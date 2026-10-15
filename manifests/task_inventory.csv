@@ -1,0 +1,6 @@
+task_id,checkpoints,core_cases,hidden_cases,candidate_status,priority,rationale
+file_backup,4,17,63,pilot_candidate,1,"Explicit core/hidden layout; four checkpoints; small Python CLI; visible core group is easy to package."
+eve_route_planner,3,8,33,pilot_candidate,2,"Explicit core/hidden layout; three checkpoints; Python CLI; independent algorithmic domain."
+code_search,5,0,0,deferred,,"No audited core/hidden directory partition in the pinned problem definition."
+dynamic_buffer,4,0,0,deferred,,"No audited core/hidden directory partition in the pinned problem definition."
+all_other_pinned_problems,,,deferred,,"Not eligible for the first pilot until reproducible visible test inputs are documented."

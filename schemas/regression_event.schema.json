@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Adjudicated RQ1 candidate-regression event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "task_id",
+    "trajectory_id",
+    "source_checkpoint",
+    "target_checkpoint",
+    "candidate_test_id",
+    "review_method",
+    "review_status",
+    "evidence_path"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "trajectory_id": { "type": "string", "minLength": 1 },
+    "source_checkpoint": { "type": "string", "pattern": "^C[1-9][0-9]*$" },
+    "target_checkpoint": { "type": "string", "pattern": "^C[1-9][0-9]*$" },
+    "candidate_test_id": { "type": "string", "minLength": 1 },
+    "review_method": { "enum": ["human", "human_with_llm_second_opinion"] },
+    "review_status": {
+      "enum": [
+        "confirmed_regression",
+        "expected_spec_change",
+        "preexisting_defect",
+        "invalid_test",
+        "environment_failure",
+        "inconclusive"
+      ]
+    },
+    "evidence_path": { "type": "string", "minLength": 1 },
+    "applicability_note": { "type": "string" },
+    "deduplication_key": { "type": "string" }
+  }
+}

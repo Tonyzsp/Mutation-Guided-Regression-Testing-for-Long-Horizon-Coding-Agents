@@ -1,0 +1,8 @@
+task_id,source_checkpoint,visible_group,visible_case_count,excluded_group,excluded_case_count,errors_group_policy,status
+file_backup,checkpoint_1,core,6,hidden,22,"Excluded pending separate protocol",audited
+file_backup,checkpoint_2,core,3,hidden,14,"Not present",audited
+file_backup,checkpoint_3,core,3,hidden,12,"Not present",audited
+file_backup,checkpoint_4,core,5,hidden,15,"Not present",audited
+eve_route_planner,checkpoint_1,core,1,hidden,10,"Not present",audited
+eve_route_planner,checkpoint_2,core,4,hidden,10,"Not present",audited
+eve_route_planner,checkpoint_3,core,3,hidden,13,"Not present",audited

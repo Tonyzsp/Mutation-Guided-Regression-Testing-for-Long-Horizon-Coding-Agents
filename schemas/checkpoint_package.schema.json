@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RQ1 checkpoint package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "task_id",
+    "trajectory_id",
+    "checkpoint_id",
+    "workspace_path",
+    "workspace_revision",
+    "specification_path",
+    "visible_tests_path",
+    "test_command",
+    "runtime_environment_id",
+    "agent_run_manifest_path"
+  ],
+  "properties": {
+    "task_id": { "type": "string", "minLength": 1 },
+    "trajectory_id": { "type": "string", "minLength": 1 },
+    "checkpoint_id": { "type": "string", "pattern": "^C[1-9][0-9]*$" },
+    "workspace_path": { "type": "string", "minLength": 1 },
+    "workspace_revision": { "type": "string", "minLength": 1 },
+    "specification_path": { "type": "string", "minLength": 1 },
+    "visible_tests_path": { "type": "string", "minLength": 1 },
+    "test_command": { "type": "string", "minLength": 1 },
+    "runtime_environment_id": { "type": "string", "minLength": 1 },
+    "agent_run_manifest_path": { "type": "string", "minLength": 1 },
+    "visible_test_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "notes": { "type": "string" }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "retrieved_on": "2026-10-15",
+  "benchmarks": {
+    "slop_code_bench_runner": {
+      "repository": "https://github.com/SprocketLab/slop-code-bench.git",
+      "commit": "31ceea3add480edb33431e70475c4c70597e6b31"
+    },
+    "slop_code_bench_problems": {
+      "repository": "https://github.com/gabeorlanski/scb-problems.git",
+      "commit": "9cd9ca3a51c3d3e2a99d2488a25baf73a2204451"
+    }
+  }
+}

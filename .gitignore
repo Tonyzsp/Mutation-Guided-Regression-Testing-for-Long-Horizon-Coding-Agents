@@ -1,0 +1,10 @@
+# Third-party benchmark clones are pinned in config/benchmarks.lock.json, not committed.
+external/
+
+# Local rendered-PDF and other disposable inspection artifacts.
+tmp/
+
+# Experiment outputs are local, generated research artifacts and must not be committed.
+data/
+results/
+outputs/
