@@ -8,3 +8,14 @@ tmp/
 data/
 results/
 outputs/
+
+# Small, reviewable result packages are intentionally versioned.  Full trajectory
+# archives remain local/external because they contain snapshots and verbose logs.
+!results/
+results/*
+!results/rq1_full_36x1/
+!results/rq1_full_36x1/**
+
+# Checkpoint packages are distributed as a Release asset, not Git blobs.
+artifacts/*
+!artifacts/README.md

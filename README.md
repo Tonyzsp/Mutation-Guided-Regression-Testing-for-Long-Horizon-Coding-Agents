@@ -3,17 +3,19 @@ CS 6158 PROJECT - Mutation-Guided Regression Testing for Long-Horizon Coding Age
 
 ## Current RQ1 setup
 
-Part A's Phase 1 artifacts are available in:
+The active research protocol is
+[`RQ1_Research_Implementation_Plan_revised.md`](RQ1_Research_Implementation_Plan_revised.md).
+Part A's supporting artifacts are:
 
-- [`docs/experiment_protocol.md`](docs/experiment_protocol.md): data-isolation and regression-event rules.
-- [`config/benchmarks.lock.json`](config/benchmarks.lock.json): pinned SlopCodeBench runner and problem commits.
-- [`manifests/task_inventory.csv`](manifests/task_inventory.csv): pilot-task decision record.
-- [`manifests/test_visibility.csv`](manifests/test_visibility.csv): audited `core`/`hidden` partitions.
-- [`schemas/`](schemas): checkpoint-package and confirmed-regression-event contracts.
-
-Verify the pinned pilot tasks after cloning the benchmark repositories into the ignored
-`external/` directory:
-
-```powershell
-python scripts/audit_problem_layout.py --task file_backup --task eve_route_planner
-```
+- [`docs/experiment_protocol.md`](docs/experiment_protocol.md): base-test access, candidate
+  regression, and LLM/human adjudication rules.
+- [`config/benchmarks.lock.json`](config/benchmarks.lock.json): pinned SlopCodeBench runner and
+  problem commits.
+- [`manifests/task_inventory.csv`](manifests/task_inventory.csv): locked 36-task, one-trajectory-per-task sweep.
+- [`config/rq1_full_sweep_36x1.yaml`](config/rq1_full_sweep_36x1.yaml): fixed configuration for the
+  full benchmark trajectory sweep.
+- [`results/rq1_full_36x1/`](results/rq1_full_36x1/): versioned aggregate output from the completed
+  36-task, one-trajectory-per-task run.
+- [`artifacts/README.md`](artifacts/README.md): download and extraction instructions for the
+  checkpoint-package GitHub Release asset used by the test-generation team.
+- [`schemas/`](schemas): checkpoint-package and candidate-regression contracts.
