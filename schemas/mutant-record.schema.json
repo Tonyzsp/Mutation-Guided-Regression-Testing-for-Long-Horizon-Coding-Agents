@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mutant-record.schema.json",
+  "title": "RQ1 Mutant Record",
+  "description": "One raw mutation-tool result normalized for analysis. Preserve raw tool output separately.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "trajectory_id",
+    "checkpoint_id",
+    "mutant_id",
+    "operator",
+    "location",
+    "diff",
+    "raw_status",
+    "raw_outcome",
+    "normalized_status",
+    "base_suite_reached_location",
+    "evidence_path"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "trajectory_id": { "type": "string", "minLength": 1 },
+    "checkpoint_id": { "type": "string", "minLength": 1 },
+    "mutant_id": { "type": "string", "minLength": 1 },
+    "operator": { "type": ["string", "null"] },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "line"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "diff": { "type": "string" },
+    "raw_status": { "type": "string", "minLength": 1 },
+    "raw_outcome": {
+      "enum": ["killed", "survived", "timeout", "error", "not_run", "unknown"]
+    },
+    "normalized_status": {
+      "enum": ["killed", "survived", "invalid", "unreachable", "suspected_equivalent", "inconclusive"]
+    },
+    "base_suite_reached_location": { "type": ["boolean", "null"] },
+    "review_status": { "enum": ["not_reviewed", "reviewed", "needs_review"] },
+    "review_rationale": { "type": ["string", "null"] },
+    "evidence_path": { "type": "string", "minLength": 1 },
+    "mutated_source_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[a-fA-F0-9]{64}$"
+    }
+  }
+}

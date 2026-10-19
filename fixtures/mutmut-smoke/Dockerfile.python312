@@ -1,0 +1,12 @@
+FROM ghcr.io/astral-sh/uv@sha256:e28141cccc682844c7bed0cb7e5b2b4522c1f72f1d5116c7d22710d0d421f7dc
+
+COPY fixtures/mutmut-smoke/requirements-linux-py312.lock /tmp/b-tools.lock
+
+RUN uv venv --seed --python 3.12 /opt/mutmut-env \
+    && uv pip install --python /opt/mutmut-env/bin/python --no-cache -r /tmp/b-tools.lock \
+    && /opt/mutmut-env/bin/python -m pip check
+
+ENV MUTMUT_VENV=/opt/mutmut-env
+ENV PATH="/opt/mutmut-env/bin:${PATH}"
+
+WORKDIR /workspace

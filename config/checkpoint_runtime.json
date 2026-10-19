@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "benchmark_problem_repository": "https://github.com/gabeorlanski/scb-problems.git",
+  "benchmark_problem_commit": "9cd9ca3a51c3d3e2a99d2488a25baf73a2204451",
+  "docker_image": "rq1-b-tools:python312",
+  "dockerfile": "fixtures/mutmut-smoke/Dockerfile.python312",
+  "container_workspace": "/workspace",
+  "default_task_profile": {
+    "checkpoint_name_prefix": "checkpoint_",
+    "pytest_plugin": "mutmut_subprocess_bridge",
+    "entrypoint_template": "/opt/mutmut-env/bin/python {entry_file}",
+    "python_source_scope": "workspace",
+    "test_command_template": [
+      "/opt/mutmut-env/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--entrypoint",
+      "/opt/mutmut-env/bin/python {entry_file}",
+      "--checkpoint",
+      "{checkpoint_name}",
+      "{test_directory}"
+    ],
+    "setup_commands": [
+      ["uv", "pip", "install", "--python", "/opt/mutmut-env/bin/python", "-r", "requirements.txt"]
+    ],
+    "asset_target_template": "{test_directory}/assets/{asset_name}"
+  },
+  "tasks": {
+    "meshctl": {
+      "entrypoint_template": "/opt/mutmut-env/bin/python /workspace/{entry_file}",
+      "test_command_template": [
+        "/opt/mutmut-env/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--entrypoint",
+        "/opt/mutmut-env/bin/python /workspace/{entry_file}",
+        "--checkpoint",
+        "{checkpoint_name}",
+        "{test_directory}"
+      ],
+      "coverage_entry_file_template": "/workspace/{entry_file}",
+      "coverage_include_globs": ["meshctl.py"]
+    }
+  }
+}
