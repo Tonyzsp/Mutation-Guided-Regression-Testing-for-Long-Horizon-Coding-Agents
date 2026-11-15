@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "budget_id": "rq1-gpt6-luna-low-3call-12288out-8candidates-repeat3-v2",
+  "scope": "pilot; apply the same policy to Vanilla and Mutation-Guided",
+  "model": {
+    "provider": "openai_codex",
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "low",
+    "temperature": null,
+    "decoding_note": "Use the Codex service default; the CLI does not expose a temperature override.",
+    "model_config_id": "openai-codex-gpt-6-luna-low-v1"
+  },
+  "budget": {
+    "max_calls": 3,
+    "max_output_tokens": 12288,
+    "per_call_output_tokens": 4096,
+    "max_candidates": 8,
+    "candidate_unit": "candidate files; each file may define exactly one top-level pytest test function",
+    "binding_dimensions": ["max_calls", "max_candidates"],
+    "repair_calls": 0,
+    "attempt_policy": "At most three launched calls total: one generation call and up to two retries only if the Codex process fails before capturing a structured response. A completed but invalid response is not repaired.",
+    "token_usage_policy": "Record service-reported usage when available. If unavailable, store null and report the limitation; do not make token-count claims. The call and eight-candidate caps remain binding."
+  },
+  "validation": {
+    "repeat_runs": 3,
+    "flakiness_rule": "Reject a candidate if collection or any execution run fails, times out, or returns a non-zero exit code.",
+    "correctness_rule": "Retain only candidates whose asserted behavior is directly specified and has an independently documented correctness rationale. No reference implementation is used.",
+    "base_suite_rule": "Run the complete sanitized package base suite unchanged with each candidate."
+  },
+  "data_policy": {
+    "generator_input_root": "data/checkpoints/checkpoint_packages_rq1_full_36x1/<task>/<checkpoint>/",
+    "hidden_and_future_data": "never supplied to generation or validation",
+    "file_backup_errors": "excluded pending A-side confirmation of legal visibility",
+    "trajectory_provenance": "Release snapshots are candidate frozen trajectories; A-side acceptance remains pending"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "generated-test-candidates.schema.json",
+  "title": "Generated Test Candidates",
+  "description": "Structured output shared by the Vanilla and Mutation-Guided generators.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tests"],
+  "properties": {
+    "tests": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/candidate" }
+    }
+  },
+  "$defs": {
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "content", "specification_basis", "target_mutant_ids"],
+      "properties": {
+        "relative_path": {
+          "type": "string",
+          "pattern": "^test_[A-Za-z0-9_]+\\.py$"
+        },
+        "content": { "type": "string", "minLength": 1 },
+        "specification_basis": {
+          "description": "A brief requirement or behavior anchor; not private chain-of-thought.",
+          "type": "string",
+          "minLength": 1
+        },
+        "target_mutant_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

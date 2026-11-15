@@ -10,6 +10,13 @@ import re
 import sys
 from pathlib import Path, PurePosixPath
 
+from isolate_checkpoint_tests import (
+    category_for,
+    is_test_source,
+    restricted_json,
+    restricted_python,
+)
+
 
 REQUIRED_FIELDS = {
     "task_id",
@@ -134,16 +141,41 @@ def audit_package(package_root: Path) -> dict[str, str]:
             f"got {observed_tests_hash}"
         )
 
-    for relative, path in walk_files(base_tests):
-        parts = {part.casefold() for part in PurePosixPath(relative).parts}
-        if "hidden" in parts:
-            raise ValueError(f"hidden test file remains in generator input: {path}")
-        if package["task_id"] == "file_backup" and "errors" in parts:
-            raise ValueError(f"excluded file_backup error test remains: {path}")
-        for part in PurePosixPath(relative).parts:
-            match = CHECKPOINT_COMPONENT.match(part.casefold())
-            if match and int(match.group(1)) > checkpoint_number:
-                raise ValueError(f"future checkpoint test file remains: {path}")
+    files = walk_files(base_tests)
+    case_ids: dict[str, set[str]] = {"hidden": set(), "future": set(), "errors": set()}
+    for relative, path in files:
+        relative_path = PurePosixPath(relative)
+        category = category_for(Path(*relative_path.parts), package["task_id"], checkpoint_number)
+        if category:
+            raise ValueError(f"{category} test input remains in generator package: {path}")
+        if path.suffix.casefold() != ".py" or not is_test_source(Path(*relative_path.parts)):
+            continue
+        source = path.read_text(encoding="utf-8")
+        sanitized, snippets, extracted_ids = restricted_python(
+            source,
+            task=package["task_id"],
+            checkpoint_number=checkpoint_number,
+        )
+        if sanitized != source or any(snippets.values()):
+            raise ValueError(f"embedded hidden/future/excluded test source remains in generator package: {path}")
+        for kind, values in extracted_ids.items():
+            case_ids[kind].update(values)
+
+    for relative, path in files:
+        if path.suffix.casefold() != ".json" or not any(token in path.name.casefold() for token in ("case", "test_data")):
+            continue
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        filtered, removed = restricted_json(
+            value,
+            task=package["task_id"],
+            checkpoint_number=checkpoint_number,
+            case_ids=case_ids,
+        )
+        if filtered != value or any(removed.values()):
+            raise ValueError(f"embedded hidden/future/excluded test records remain in generator package: {path}")
 
     return {
         "task_id": package["task_id"],

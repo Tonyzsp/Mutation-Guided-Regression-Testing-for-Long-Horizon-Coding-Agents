@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RQ1 candidate regression adjudication",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reviews"],
+  "properties": {
+    "reviews": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["case_id", "verdict", "confidence", "issue_summary", "issue_key", "rationale", "evidence_refs", "human_review_recommended"],
+        "properties": {
+          "case_id": {"type": "string", "pattern": "^case-[0-9]{4,}$"},
+          "verdict": {
+            "enum": ["confirmed_regression", "expected_spec_change", "preexisting_defect", "invalid_test", "environment_failure", "inconclusive"]
+          },
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "issue_summary": {"type": "string", "minLength": 1},
+          "issue_key": {"type": "string", "minLength": 1},
+          "rationale": {"type": "string", "minLength": 1},
+          "evidence_refs": {"type": "array", "items": {"type": "string"}},
+          "human_review_recommended": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

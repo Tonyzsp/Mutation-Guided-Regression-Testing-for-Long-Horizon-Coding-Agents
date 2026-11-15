@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "budget_id": "eve-route-planner-guided-zarzakh-rounding-exploratory-v2-1call-4096out-1candidate",
+  "scope": "Separate exploratory follow-up after v1 emitted a semantically correct oracle with an invalid relative executable path. This v2 probes the same synthetic minute-rounding behavior with the pytest entrypoint fixture made explicit; it is excluded from formal paired RQ1 results.",
+  "prompt_template_version": "mutation_guided_gap_cohort_v1_synthetic_zarzakh_rounding_pilot_v2_fixture",
+  "require_generation_assessment": true,
+  "output_schema": "schemas/codex-generated-test-candidates-gap-v2.schema.json",
+  "model": {
+    "provider": "openai_codex",
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "temperature": null,
+    "decoding_note": "Use the Codex service default; the CLI does not expose a temperature override.",
+    "model_config_id": "openai-codex-gpt-6-luna-medium-synthetic-zarzakh-rounding-pilot-v2-fixture"
+  },
+  "budget": {
+    "max_calls": 1,
+    "max_output_tokens": 4096,
+    "per_call_output_tokens": 4096,
+    "max_candidates": 1,
+    "candidate_unit": "candidate files; each file may define exactly one top-level pytest test function",
+    "binding_dimensions": ["max_calls", "max_candidates"],
+    "repair_calls": 0,
+    "attempt_policy": "One generation call. Do not retry a structured response, including an empty candidate list.",
+    "token_usage_policy": "Record service-reported usage when available. If unavailable, store null and report the limitation."
+  },
+  "validation": {
+    "repeat_runs": 3,
+    "target_repeat_runs": 3,
+    "flakiness_rule": "Reject a candidate if collection or any source-checkpoint execution fails, times out, or is unstable.",
+    "correctness_rule": "Retain only the six-hour lock and minute-rounded output specified in C1; this synthetic fixture is an isolated engineering probe.",
+    "base_suite_rule": "Preserve the complete sanitized C1 base suite unchanged and require its repeated baseline behavior to remain stable.",
+    "guided_rule": "The retained candidate must fail by a test assertion on the exact same-checkpoint target mutant and pass unchanged C1 in every source repeat."
+  },
+  "data_policy": {
+    "generator_input_root": "data/checkpoints/checkpoint_packages_rq1_full_36x1/eve_route_planner/C1/",
+    "additional_engineering_context": "The opportunity brief contains only a synthetic three-system SDE, a minute-rounding boundary calculation, and an instruction to use the supplied entrypoint_argv pytest fixture; it contains no hidden, future, or regression data.",
+    "hidden_and_future_data": "never supplied to generation, mutation triage, or validation",
+    "formal_cohort_inclusion": "excluded"
+  }
+}

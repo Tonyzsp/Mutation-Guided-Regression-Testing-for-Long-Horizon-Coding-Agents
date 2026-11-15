@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "candidate-correctness-review.schema.json",
+  "title": "Independent C1 Generated-Test Correctness Review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reviews"],
+  "properties": {
+    "reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["candidate_path", "verdict", "rationale", "reviewer"],
+        "properties": {
+          "candidate_path": { "type": "string", "minLength": 1 },
+          "verdict": { "enum": ["correct", "incorrect", "uncertain"] },
+          "rationale": { "type": "string", "minLength": 1 },
+          "reviewer": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

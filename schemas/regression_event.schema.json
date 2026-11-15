@@ -9,7 +9,7 @@
     "trajectory_id",
     "source_checkpoint",
     "target_checkpoint",
-    "candidate_test_id",
+    "candidate_test_ids",
     "review_method",
     "review_status",
     "evidence_path"
@@ -20,8 +20,15 @@
     "trajectory_id": { "type": "string", "minLength": 1 },
     "source_checkpoint": { "type": "string", "pattern": "^C[1-9][0-9]*$" },
     "target_checkpoint": { "type": "string", "pattern": "^C[1-9][0-9]*$" },
-    "candidate_test_id": { "type": "string", "minLength": 1 },
-    "review_method": { "enum": ["human", "human_with_llm_second_opinion"] },
+    "candidate_test_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "review_method": {
+      "enum": ["llm_judge", "human", "llm_judge_with_human_review"]
+    },
     "review_status": {
       "enum": [
         "confirmed_regression",
@@ -33,6 +40,9 @@
       ]
     },
     "evidence_path": { "type": "string", "minLength": 1 },
+    "judge_config_id": { "type": "string", "minLength": 1 },
+    "review_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "human_review_note": { "type": "string" },
     "applicability_note": { "type": "string" },
     "deduplication_key": { "type": "string" }
   }

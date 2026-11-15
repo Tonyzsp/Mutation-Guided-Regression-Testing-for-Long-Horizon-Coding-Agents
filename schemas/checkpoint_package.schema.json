@@ -10,10 +10,11 @@
     "workspace_path",
     "workspace_revision",
     "specification_path",
-    "visible_tests_path",
+    "base_tests_path",
     "test_command",
     "runtime_environment_id",
-    "agent_run_manifest_path"
+    "agent_run_manifest_path",
+    "base_tests_sha256"
   ],
   "properties": {
     "task_id": { "type": "string", "minLength": 1 },
@@ -22,11 +23,15 @@
     "workspace_path": { "type": "string", "minLength": 1 },
     "workspace_revision": { "type": "string", "minLength": 1 },
     "specification_path": { "type": "string", "minLength": 1 },
-    "visible_tests_path": { "type": "string", "minLength": 1 },
+    "base_tests_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Package-relative path to the complete legally visible test suite after hidden, excluded, and future test data have been isolated."
+    },
     "test_command": { "type": "string", "minLength": 1 },
     "runtime_environment_id": { "type": "string", "minLength": 1 },
     "agent_run_manifest_path": { "type": "string", "minLength": 1 },
-    "visible_test_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "base_tests_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "notes": { "type": "string" }
   }
 }

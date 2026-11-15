@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "codex-generated-test-candidates.schema.json",
+  "title": "Codex Structured Candidate Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tests"],
+  "properties": {
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relative_path", "content", "specification_basis", "target_mutant_ids"],
+        "properties": {
+          "relative_path": { "type": "string" },
+          "content": { "type": "string" },
+          "specification_basis": { "type": "string" },
+          "target_mutant_ids": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

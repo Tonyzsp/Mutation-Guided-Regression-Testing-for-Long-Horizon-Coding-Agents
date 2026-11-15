@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "generation-run.schema.json",
+  "title": "RQ1 Test Generation Run",
+  "description": "Provenance, budget, and outcome record for one method at one checkpoint.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "trajectory_id",
+    "checkpoint_id",
+    "method",
+    "model_config_id",
+    "budget_id",
+    "prompt_template_version",
+    "input_manifest_path",
+    "prompt_archive_path",
+    "budget",
+    "actual_usage",
+    "candidate_count",
+    "retained_count",
+    "validation_log_path"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "format": { "const": "rq1-generation-run/v1" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "trajectory_id": { "type": "string", "minLength": 1 },
+    "checkpoint_id": { "type": "string", "minLength": 1 },
+    "method": { "enum": ["vanilla_llm", "mutation_guided"] },
+    "model_config_id": { "type": "string", "minLength": 1 },
+    "budget_id": { "type": "string", "minLength": 1 },
+    "prompt_template_version": { "type": "string", "minLength": 1 },
+    "input_manifest_path": { "type": "string", "minLength": 1 },
+    "prompt_archive_path": { "type": "string", "minLength": 1 },
+    "attempts_path": { "type": "string", "minLength": 1 },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_calls", "max_output_tokens", "max_candidates"],
+      "properties": {
+        "max_calls": { "type": "integer", "minimum": 0 },
+        "max_output_tokens": { "type": "integer", "minimum": 0 },
+        "max_candidates": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "actual_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["calls", "input_tokens", "output_tokens", "token_usage_available"],
+      "properties": {
+        "calls": { "type": "integer", "minimum": 0 },
+        "input_tokens": { "type": ["integer", "null"], "minimum": 0 },
+        "output_tokens": { "type": ["integer", "null"], "minimum": 0 },
+        "token_usage_available": { "type": "boolean" },
+        "unavailable_reason": { "type": ["string", "null"] },
+        "generation_wall_seconds": { "type": ["number", "null"], "minimum": 0 },
+        "mutation_analysis_wall_seconds": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "candidate_count": { "type": "integer", "minimum": 0 },
+    "generation_assessment": { "type": "string" },
+    "retained_count": { "type": "integer", "minimum": 0 },
+    "validation_log_path": { "type": "string", "minLength": 1 },
+    "codex_exit_code": { "type": "integer" },
+    "cli_attempts": { "type": "integer", "minimum": 0 },
+    "output_budget_exceeded": { "type": ["boolean", "null"] },
+    "created_at_utc": { "type": "string", "format": "date-time" },
+    "temperature": { "type": ["number", "null"] },
+    "decoding_note": { "type": "string" },
+    "mutation_record_set_path": { "type": "string", "minLength": 1 },
+    "mutation_record_set_sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+    "eligible_mutant_count": { "type": "integer", "minimum": 0 },
+    "semantic_eligible_mutant_count": { "type": "integer", "minimum": 0 },
+    "eligible_not_selected_mutant_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    },
+    "guided_mutant_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "method": { "const": "mutation_guided" } } },
+      "then": {
+        "required": [
+          "guided_mutant_ids",
+          "mutation_record_set_path",
+          "mutation_record_set_sha256",
+          "eligible_mutant_count"
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "method": { "const": "vanilla_llm" } } },
+      "then": { "not": { "required": ["guided_mutant_ids"] } }
+    }
+  ]
+}

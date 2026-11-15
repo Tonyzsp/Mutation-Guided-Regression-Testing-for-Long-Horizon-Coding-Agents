@@ -3,15 +3,16 @@
 ## Scope and frozen benchmark inputs
 
 This protocol covers RQ1 only: whether tests generated at checkpoint `C_i` detect more
-later regression candidates than the Original visible suite under the same generation budget.
+later regression candidates than the Original base suite under the same generation budget.
 The SlopCodeBench runner and problem definitions are pinned in
 [`config/benchmarks.lock.json`](../config/benchmarks.lock.json). Do not silently update either
 checkout during an experiment.
 
-The first pilot candidates are `file_backup` and `eve_route_planner`. Both expose an explicit
-`tests/data/checkpoint_N/{core,hidden}` layout. The project does **not** use the upstream
-`hidden` group as an oracle: it is excluded from every experiment flow. Other problems are
-deferred until their visible test inputs can be documented and packaged reproducibly.
+The Release provides 196 checkpoint packages across 36 task trajectories. The first runtime
+integration example is `eve_route_planner/C1`; the supplied packages are candidate frozen
+trajectories and do not need to be regenerated unless the team rejects their provenance. The
+upstream `hidden` group is excluded from every experiment flow and is isolated from generator
+inputs.
 
 ## Data-access policy
 
@@ -19,7 +20,7 @@ deferred until their visible test inputs can be documented and packaged reproduc
 | --- | --- | --- | --- |
 | Current checkpoint specification | Yes | Yes | Yes |
 | Current checkpoint workspace | Yes | Yes | Yes |
-| `core` cases from the source checkpoint | Yes | Yes | Yes |
+| Complete legal `base_tests` from the source checkpoint package | Yes | Yes | Yes |
 | Generated tests frozen at the source checkpoint | No | Yes | Yes |
 | Upstream `hidden` cases from any checkpoint | No | No | No - excluded from this study |
 | Future checkpoint specs, workspaces, and tests | No | No | Yes, only after a suite is frozen |
@@ -28,16 +29,17 @@ deferred until their visible test inputs can be documented and packaged reproduc
 `hidden` files must never be copied into a checkpoint package, generated-test prompt, test
 generation workspace, adjudication bundle, or version-controlled experiment output.
 
-For the pilot, Original means the source checkpoint's `core` cases only. The `errors` group in
-`file_backup` is excluded until the team documents a separate policy for expected-error
-behavior. This prevents a post-hoc change to the baseline.
+Original is the complete legal `base_tests` bundle supplied for the source checkpoint. Do not
+create an additional visible/held-out split. The Release isolation manifest places
+`file_backup/errors` under `data/excluded_tests/`; it stays outside all generators and RQ1
+evaluation inputs. The exact package `base_tests` hashes are recorded in the C1 baseline audit.
 
 ## Candidate-regression and adjudication rule
 
-A candidate event is created when a test frozen at `C_i` passes on `C_i` and fails on a later
-checkpoint `C_j`. A candidate has a stable `event_id`, a neutral test identifier, and a minimal
-reproduction log. Failures caused by test collection, timeout infrastructure, or an unfrozen test
-are not candidates.
+A candidate event is created when a test frozen at `C_i` passes on `C_i`, fails on a later
+checkpoint `C_j`, and fails again in three targeted reruns. A candidate has a stable `event_id`, a
+neutral test identifier, and a minimal reproduction log. Failures caused by test collection,
+timeout infrastructure, or an unfrozen test are not candidates.
 
 Each candidate is adjudicated after all suites and checkpoints for the experimental unit are
 frozen. A confirmed regression has a `review_status` of `confirmed_regression` and satisfies all
@@ -48,13 +50,22 @@ conditions below:
 3. the earlier requirement remains applicable at the later checkpoint; and
 4. the failure reproduces in the frozen environment and is not an infrastructure error.
 
-The primary adjudicator is a human reviewer. An LLM reviewer may provide an independent second
-opinion, but it receives the same review bundle and cannot overrule the human. The bundle contains
-the source and target specifications, source and target workspace snapshots, a neutralized failing
-test/reproduction, and logs. It must not identify whether the test was Original, Vanilla, or
-Mutation-Guided. Reviewer outcomes are `confirmed_regression`, `expected_spec_change`,
-`preexisting_defect`, `invalid_test`, `environment_failure`, or `inconclusive`. Disagreements and
-all `inconclusive` outcomes require human resolution before analysis.
+Adjudication is LLM-only because the project does not have enough human-review capacity. Before
+opening any later-checkpoint failure results, freeze the judge model/version, reasoning setting,
+prompt, output schema, and confidence rule. The judge receives the same review bundle for every
+method and is blinded to whether the test is Original, Vanilla, or Mutation-Guided. The bundle
+contains the source and target specifications, checkpoint manifests and hashes, a neutralized
+failing test/reproduction, failure logs, and the C1-to-target code diff.
+
+Record the judge's raw verdict, confidence, rationale, evidence references, and whether it would
+recommend human review. No human review will be performed. Map any case with confidence below
+`0.80`, a malformed/failed judge response, or `human_review_recommended=true` to
+`inconclusive`; do not count it as a confirmed regression or another resolved outcome. Only
+LLM-adjudicated cases meeting the frozen confidence rule contribute to the reported counts. Label
+the results as LLM-adjudicated and report the confidence threshold and unreviewed uncertainty as a
+limitation. Resolved verdicts are `confirmed_regression`, `expected_spec_change`,
+`preexisting_defect`, `invalid_test`, or `environment_failure`; unresolved cases are
+`inconclusive` and are not counted.
 
 Duplicate tests diagnosing the same behavioral defect are assigned one `event_id`; one event can
 be detected by many tests but is counted once per method.
@@ -73,31 +84,52 @@ number of events shared or unique to each method.
 
 ## Pilot workflow
 
-1. Verify the pinned problem checkout with `python scripts/audit_problem_layout.py`.
-2. Create a separate agent workspace for `C1`; supply only the current specification, static
-   assets, and permitted context. Do not mount the problem test directory.
-3. Run the agent with a recorded model, agent version, prompt, environment, timeout, and seed.
-4. Freeze the workspace, its commit/hash, logs, and original-core test results as a checkpoint
-   package.
-5. Create the visible-test bundle from `core` only. Part B receives that bundle and the package,
-   never the upstream problem checkout.
-6. After Part B freezes a suite, run Original, Vanilla, and Mutation-Guided suites unchanged on
-   later frozen checkpoints.
-7. Create and blind-review candidate bundles for reproducible later-checkpoint failures, then map
-   confirmed event IDs back to methods for aggregation.
+1. Verify the sanitized checkpoint packages with `python scripts/validate_checkpoint_package.py`.
+2. Confirm that the Release snapshots and run metadata satisfy the team's frozen-trajectory
+   provenance requirements; do not regenerate the coding-agent trajectory by default.
+3. B receives only the sanitized source checkpoint package, its specification, workspace, and
+   complete legal base tests. Benchmark static assets are mounted read-only through the runtime
+   adapter; the upstream problem test directory is not exposed.
+4. Record the agent/model, environment, prompt, checkpoint hashes, and available run metadata.
+   The Release excludes raw agent conversation logs, so decide whether the supplied manifest and
+   aggregate records are sufficient.
+5. After B freezes all three suites, A runs them unchanged on applicable later checkpoints.
+6. Create blinded candidate bundles for reproducible failures, adjudicate them using the fixed
+   LLM-only judge, mark low-confidence or flagged cases inconclusive, then map deduplicated event
+   IDs back to methods.
 
-## Gate 1 status (2026-10-15)
+## Formal cohort execution status (updated 2026-11-14)
 
 | Requirement | Status | Evidence / next action |
 | --- | --- | --- |
-| Runner source pinned | Complete | `config/benchmarks.lock.json` |
-| Problem source pinned | Complete | `config/benchmarks.lock.json` |
-| Candidate tasks identified | Complete | `manifests/task_inventory.csv` |
-| Visible/excluded partition audited | Complete for the two pilot candidates | `manifests/test_visibility.csv` |
-| Python/`uv` environment | Blocked locally | `uv` was not available on this machine |
-| Docker execution environment | Blocked locally | Docker CLI was not available on this machine |
-| Agent/model/version/prompt fixed | Pending team decision | Record in the first checkpoint package |
-| Pilot trajectory | Pending environment and agent credentials | Start with `file_backup` |
+| Runner and problem source pinned | Complete | `config/benchmarks.lock.json`; the Release snapshots and run manifests are accepted as the frozen trajectories for this cohort |
+| Checkpoint packages and visibility | Complete | 196 packages across 36 tasks; sanitized C1 `base_tests` are the shared legal suite; hidden, future, excluded, and reference inputs stay outside generators |
+| C1 baseline | Complete | 36/36 tasks audited for three repetitions; 26 stable-with-failures, 10 stable-pass, zero unusable; audit SHA-256 is recorded in [pre-evaluation readiness](pre_evaluation_readiness.md) |
+| Coverage integrity | Complete | 36/36 C1 tasks linked to the final base-audit hash; no audit errors |
+| Runtime and mutation execution | Validated at representative scale | Direct mutmut and subprocess association work on `cfgpipe` and `eve_route_planner`; hash-matched mutant summaries exist for 8/36 tasks |
+| Vanilla C1 suites | Generation and validation artifacts available | 36 hash-linked manifests; 48 retained candidates across 25 suites. Complete the final audit against the canonical paired budget and candidate-review records |
+| Mutation-Guided C1 suites | Pilot only | 4 hash-linked manifests across 36 tasks; two have test files. Complete survivor triage and budget-matched generation/validation across the cohort |
+| Candidate correctness review | Pilot calibrated, integration pending | Standalone LLM reviewer distinguishes one supported and one contradictory candidate; integrate into both generation cohort workflows and archive every verdict |
+| Formal paired generation budget | Needs final lock | Existing configs include formal and pilot variants. Select one canonical paired budget and reference its hash in both method runs |
+| Later-checkpoint evaluation | Not started | Begin only after all Original/Vanilla/Guided suites and the 36-task pre-evaluation integrity manifest pass |
+| Regression adjudication and RQ1 report | Not started | Use the same frozen method-blind LLM judge for every suite; low-confidence or malformed reviews remain inconclusive |
 
-The two local-environment blockers must be resolved before any result is treated as an
-experimental result. They do not block the repository, visibility, or schema work above.
+The validation phase is closed for method feasibility; the project is in full development for the remaining cohort outputs. See the [phase exit review](../reports/validation_phase_exit_20261114.md) for detailed evidence, limits, and development gates.
+
+### Historical Release revalidation note (2026-10-19)
+
+The original Release archive was restored before reapplying isolation because an earlier sanitizer
+mistook a generic JSON field name for a test-case ID and removed legal test data. The corrected
+sanitizer uses explicit category markers and case-ID fields; package validation covers all 196
+packages. Historical outputs whose input hashes do not match the final sanitized packages are not
+eligible for the formal comparison.
+
+The Release metadata for `file_merger` checkpoints C1-C4 did not match the archived `base_tests`
+content. The exporter records the actual sanitized content hashes; any formal run must use those
+hash-linked package values rather than silently trusting the upstream metadata.
+
+## Earlier Gate 2 package integration record
+
+See [Gate 2 Checkpoint Integration](gate2_checkpoint_integration.md) for the package/schema
+alignment and 196-package isolation audit. Its runtime status is historical; use the formal
+cohort status table above for the current execution state.

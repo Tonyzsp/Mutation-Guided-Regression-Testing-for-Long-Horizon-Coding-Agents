@@ -1,0 +1,140 @@
+{
+  "schema_version": "controlled-pairwise-mutant-pool/v1",
+  "experiment_id": "controlled_pairwise_v1_20261019",
+  "eligibility_rubric": [
+    "survives the complete C1 base suite and the direct revalidation run",
+    "the changed behavior conflicts with a specific public C1 specification requirement",
+    "the behavior is observable through the documented command-line interface",
+    "a deterministic input can distinguish C1 from the mutant",
+    "the required inputs are present in the pinned task data or can be constructed with the supplied task fixture",
+    "the mutant is not equivalent or unreachable for the chosen valid input"
+  ],
+  "sampling_unit": "one representative mutant per distinct specification-level behavior family; include the full eligible representative pool when it is at most 20",
+  "mutants": [
+    {
+      "task_id": "cfgpipe",
+      "mutant_id": "cfgpipe.x_load_schema__mutmut_13",
+      "behavior_family": "duplicate_root_parameter_names",
+      "specification_basis": "The specification requires unique parameter names. Removing the duplicate-key hook accepts a JSON object with repeated root keys, which is externally visible in CLI success/output versus the required schema failure.",
+      "trigger_feasibility": "A small deterministic schema JSON file containing the same parameter key twice is sufficient; no environment or external fixture is required."
+    },
+    {
+      "task_id": "code_search",
+      "mutant_id": "code_search.x_load_rules__mutmut_36",
+      "behavior_family": "rule_id_must_be_nonempty_string",
+      "specification_basis": "The rule schema requires id to be a non-empty string. The mutation can accept a non-string, truthy identifier.",
+      "trigger_feasibility": "A deterministic JSON rule with a numeric nonzero id distinguishes the behavior through CLI rejection and stdout/stderr."
+    },
+    {
+      "task_id": "code_search",
+      "mutant_id": "code_search.x_load_rules__mutmut_42",
+      "behavior_family": "rule_ids_must_be_unique",
+      "specification_basis": "The rules-array constraints require id values to be unique. The mutation stops recording each actual ID and can accept a duplicate.",
+      "trigger_feasibility": "A deterministic rules JSON array with two otherwise valid rules sharing one id is sufficient."
+    },
+    {
+      "task_id": "code_search",
+      "mutant_id": "code_search.x_load_rules__mutmut_49",
+      "behavior_family": "pattern_must_be_nonempty",
+      "specification_basis": "The rule schema requires a non-empty pattern string. The mutation can accept an empty string.",
+      "trigger_feasibility": "A deterministic rule with pattern set to an empty string is sufficient."
+    },
+    {
+      "task_id": "code_search",
+      "mutant_id": "code_search.x_load_rules__mutmut_54",
+      "behavior_family": "languages_must_be_python_only",
+      "specification_basis": "When languages is present, it may contain only the string python. The mutation ignores the specified languages field and can accept an unsupported language value.",
+      "trigger_feasibility": "A deterministic valid-shape rule with languages set to [\"javascript\"] distinguishes acceptance from required rejection. Mutants 58 and 59 are redundant variants of the same behavior family and are not sampled separately."
+    },
+    {
+      "task_id": "code_search",
+      "mutant_id": "code_search.x_load_rules__mutmut_62",
+      "behavior_family": "language_entries_must_be_strings_and_python",
+      "specification_basis": "The specification independently requires languages to be an array of strings and limits every value to python. The mutation weakens the combined validation and can admit an unsupported language.",
+      "trigger_feasibility": "A deterministic languages array containing an unsupported string is sufficient."
+    },
+    {
+      "task_id": "code_search",
+      "mutant_id": "code_search.x_load_rules__mutmut_94",
+      "behavior_family": "regex_flags_are_combined",
+      "specification_basis": "The regex_flags array may contain any subset of i, m, and s; multiple listed flags must all affect regex matching. The mutation overwrites rather than combines the flags.",
+      "trigger_feasibility": "A deterministic multiline, case-insensitive regex input requiring both m and i distinguishes the result."
+    },
+    {
+      "task_id": "code_search",
+      "mutant_id": "code_search.x_load_rules__mutmut_102",
+      "behavior_family": "regex_flags_only_for_regex_rules",
+      "specification_basis": "The rule schema states regex_flags are only valid for kind=regex. The mutation can ignore that field when kind=exact.",
+      "trigger_feasibility": "A deterministic exact-match rule that also supplies regex_flags must be rejected. Mutant 103 is a redundant key-name variant of this same specification-level behavior family."
+    },
+    {
+      "task_id": "code_search",
+      "mutant_id": "code_search.x_position__mutmut_10",
+      "behavior_family": "one_based_line_coordinates",
+      "specification_basis": "Output line coordinates are explicitly 1-based. The mutation can miscount a match following a newline at offset zero.",
+      "trigger_feasibility": "A source file beginning with a newline followed by a matching character yields a deterministic expected line number."
+    },
+    {
+      "task_id": "code_search",
+      "mutant_id": "code_search.x_position__mutmut_21",
+      "behavior_family": "one_based_column_coordinates",
+      "specification_basis": "Output column coordinates are explicitly 1-based. The mutation can miscount a match following a newline at offset zero.",
+      "trigger_feasibility": "A source file beginning with a newline followed by a matching character yields a deterministic expected column number."
+    },
+    {
+      "task_id": "eve_industry",
+      "mutant_id": "industry.x_main__mutmut_98",
+      "behavior_family": "only_published_recipe_items_are_valid",
+      "specification_basis": "The SDE contract says only items with published==1 are valid. The mutation admits a recipe whose blueprint is unpublished even when a published recipe is available for that product.",
+      "trigger_feasibility": "The pinned SDE contains a published product with both an unpublished and a published blueprint recipe; the IDs and recipe data can be discovered from the supplied SDE fixture."
+    },
+    {
+      "task_id": "eve_industry",
+      "mutant_id": "industry.x_main__mutmut_418",
+      "behavior_family": "missing_market_group_prints_none",
+      "specification_basis": "The canonical output requires Market Group: None when no market group exists. The mutation forces the market-path branch for an item with an empty market path.",
+      "trigger_feasibility": "The pinned SDE includes published recipe items without market groups; a test can deterministically select one from the SDE tables."
+    },
+    {
+      "task_id": "eve_industry",
+      "mutant_id": "industry.x_main__mutmut_422",
+      "behavior_family": "market_group_none_literal",
+      "specification_basis": "The canonical output requires the literal None for an item without a market group. The mutation changes that literal.",
+      "trigger_feasibility": "The pinned SDE includes published recipe items without market groups. Mutant 423 is a redundant alternate spelling in the same behavior family and is not sampled separately."
+    },
+    {
+      "task_id": "eve_industry",
+      "mutant_id": "industry.x_main__mutmut_428",
+      "behavior_family": "nonship_volume_value",
+      "specification_basis": "The output volume must be the item's SDE volume, while only ship items use packaged ship volume. The mutation formats non-ship volume as if it were a ship and can change its numeric value.",
+      "trigger_feasibility": "The pinned SDE and visible examples include non-ship items with more than two decimal places in their volume."
+    },
+    {
+      "task_id": "eve_industry",
+      "mutant_id": "industry.x_main__mutmut_429",
+      "behavior_family": "canonical_recipe_heading",
+      "specification_basis": "The canonical block requires the exact Recipe: heading and ordering. The mutation removes the required heading/newline.",
+      "trigger_feasibility": "Any valid published recipe in the supplied SDE provides a deterministic CLI oracle. Mutants 430 and 431 are redundant heading-format variants and are not sampled separately."
+    },
+    {
+      "task_id": "eve_industry",
+      "mutant_id": "industry.x_main__mutmut_446",
+      "behavior_family": "case_insensitive_material_sort",
+      "specification_basis": "The materials table must be sorted alphabetically by item name case-insensitively. The mutation changes the ordering rule.",
+      "trigger_feasibility": "The pinned SDE contains a published recipe whose material names distinguish case-insensitive from case-sensitive ordering."
+    }
+  ],
+  "redundant_behavior_variants": [
+    {"task_id":"code_search","mutant_id":"code_search.x_load_rules__mutmut_58","representative":"code_search.x_load_rules__mutmut_54","rationale":"Same public behavior family: ignores the supplied languages key and may accept unsupported languages."},
+    {"task_id":"code_search","mutant_id":"code_search.x_load_rules__mutmut_59","representative":"code_search.x_load_rules__mutmut_54","rationale":"Same public behavior family: ignores the supplied languages key and may accept unsupported languages."},
+    {"task_id":"code_search","mutant_id":"code_search.x_load_rules__mutmut_103","representative":"code_search.x_load_rules__mutmut_102","rationale":"Same public behavior family: ignores regex_flags on exact rules."},
+    {"task_id":"eve_industry","mutant_id":"industry.x_main__mutmut_423","representative":"industry.x_main__mutmut_422","rationale":"Same public requirement and trigger: the no-market-group literal is incorrect."},
+    {"task_id":"eve_industry","mutant_id":"industry.x_main__mutmut_430","representative":"industry.x_main__mutmut_429","rationale":"Same public requirement and trigger: the canonical Recipe heading is incorrect."},
+    {"task_id":"eve_industry","mutant_id":"industry.x_main__mutmut_431","representative":"industry.x_main__mutmut_429","rationale":"Same public requirement and trigger: the canonical Recipe heading is incorrect."}
+  ],
+  "excluded_mutant_families": [
+    {"task_id":"code_search","mutant_id":"code_search.x_main__mutmut_67","status":"deferred","rationale":"The decode-error continue-to-break behavior depends on filesystem enumeration order; deterministic ordering is not guaranteed by the public contract."},
+    {"task_id":"code_search","mutant_id":"code_search.x_search_file__mutmut_46","status":"out_of_scope","rationale":"The exact-match overlap behavior is not specified, so an assertion about overlapping matches would not have a specification-backed oracle."},
+    {"task_id":"eve_industry","mutant_id":"industry.x_main__mutmut_292","status":"deferred","rationale":"The pinned SDE has no published recipe product with zero volume; a custom SDE fixture would be required, so this target is excluded from the initial controlled sample."}
+  ]
+}

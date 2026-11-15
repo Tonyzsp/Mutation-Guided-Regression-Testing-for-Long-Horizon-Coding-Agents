@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "budget_id": "rq1-c1-cohort-gpt6-luna-medium-3calls-12288out-8candidates-repeat3-v1",
+  "scope": "paired Vanilla and Mutation-Guided generation for the 36 sanitized C1 checkpoints; same generation limits and shared gap brief",
+  "prompt_template_version": "c1_shared_gap_v4_cohort_v1",
+  "require_generation_assessment": true,
+  "output_schema": "schemas/codex-generated-test-candidates-gap-v2.schema.json",
+  "model": {
+    "provider": "openai_codex",
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "temperature": null,
+    "decoding_note": "Use the Codex service default; the CLI does not expose a temperature override.",
+    "model_config_id": "openai-codex-gpt-6-luna-medium-c1-cohort-v1"
+  },
+  "budget": {
+    "max_calls": 3,
+    "max_output_tokens": 12288,
+    "per_call_output_tokens": 4096,
+    "max_candidates": 8,
+    "candidate_unit": "candidate files; each file may define exactly one top-level pytest test function",
+    "binding_dimensions": ["max_calls", "max_candidates"],
+    "repair_calls": 0,
+    "attempt_policy": "At most three launched calls total per method, task, and C1 source checkpoint: one generation call and up to two retries only if the Codex process fails before a structured response is captured. A completed response, including an empty test list, is not retried.",
+    "token_usage_policy": "Record service-reported usage when available. If unavailable, store null and report the limitation; do not make token-count claims. The call and eight-candidate caps remain binding."
+  },
+  "validation": {
+    "repeat_runs": 3,
+    "flakiness_rule": "Reject a candidate if collection or any execution run fails, times out, is unstable, or introduces a failure beyond the stable C1 baseline.",
+    "correctness_rule": "Retain only candidates whose asserted behavior is directly specified and has an independently documented correctness rationale. No reference implementation is assumed.",
+    "base_suite_rule": "Preserve the complete sanitized package base suite unchanged. When it has stable C1 failures, record those failures and require each generated candidate to pass without introducing additional failures.",
+    "guided_rule": "Each retained Guided candidate must directly kill at least one named same-checkpoint surviving mutant when that candidate alone is run against the mutated source."
+  },
+  "data_policy": {
+    "generator_input_root": "data/checkpoints/checkpoint_packages_rq1_full_36x1/<task>/C1/",
+    "hidden_and_future_data": "never supplied to generation, mutation triage, or validation",
+    "file_backup_errors": "excluded from the released legal base_tests packages and isolated under data/excluded_tests per the Release isolation manifest",
+    "trajectory_provenance": "The Release snapshots and per-checkpoint agent_run_manifest.json are treated as the frozen C1 trajectories; raw conversation transcripts are not present in the Release"
+  }
+}

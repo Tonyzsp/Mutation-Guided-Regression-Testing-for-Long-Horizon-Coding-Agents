@@ -1,0 +1,8 @@
+[project]
+name = "mutmut-smoke-fixture"
+version = "0.1.0"
+requires-python = ">=3.10"
+
+[tool.mutmut]
+source_paths = ["src/fixture_pkg/"]
+pytest_add_cli_args_test_selection = ["tests/base/"]

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "codex-generated-test-candidates-gap-v2.schema.json",
+  "title": "Codex Test Candidates with Gap Assessment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tests", "assessment"],
+  "properties": {
+    "assessment": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 3000,
+      "description": "Brief public rationale listing covered and omitted gap IDs; no private chain-of-thought."
+    },
+    "tests": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/candidate" }
+    }
+  },
+  "$defs": {
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "content", "specification_basis", "target_mutant_ids"],
+      "properties": {
+        "relative_path": { "type": "string", "pattern": "^test_[A-Za-z0-9_]+\\.py$" },
+        "content": { "type": "string", "minLength": 1 },
+        "specification_basis": { "type": "string", "minLength": 1 },
+        "target_mutant_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frozen-test-suite.schema.json",
+  "title": "RQ1 Frozen Test Suite Package",
+  "description": "A method suite frozen for evaluation on later checkpoints.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "trajectory_id",
+    "source_checkpoint",
+    "method",
+    "suite_path",
+    "base_suite_path",
+    "generated_test_paths",
+    "validation_log_path",
+    "suite_sha256",
+    "model_config_id",
+    "budget_id",
+    "frozen_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "trajectory_id": { "type": "string", "minLength": 1 },
+    "source_checkpoint": { "type": "string", "minLength": 1 },
+    "method": { "enum": ["vanilla_llm", "mutation_guided"] },
+    "suite_path": { "type": "string", "minLength": 1 },
+    "base_suite_path": { "type": "string", "minLength": 1 },
+    "generated_test_paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "validation_log_path": { "type": "string", "minLength": 1 },
+    "suite_sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+    "model_config_id": { "type": "string", "minLength": 1 },
+    "budget_id": { "type": "string", "minLength": 1 },
+    "frozen_at": { "type": "string", "format": "date-time" },
+    "metadata": { "type": "object" }
+  }
+}

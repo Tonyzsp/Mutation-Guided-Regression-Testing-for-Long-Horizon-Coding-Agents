@@ -260,6 +260,7 @@ def main() -> int:
                 "raw_outcome": raw_outcome,
                 "normalized_status": normalized,
                 "base_suite_reached_location": None,
+                "target_function_reached_in_baseline": None,
                 "review_status": "needs_review" if normalized == "survived" else "not_reviewed",
                 "review_rationale": None,
                 "evidence_path": "mutmut-results.txt;mutmut-run.log;mutmut-subprocess-hits.jsonl",

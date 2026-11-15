@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 CHECKPOINT_TEST = re.compile(r"test_checkpoint_(\d+)\.py$")
+CHECKPOINT_COMPONENT = re.compile(r"^(?:test_)?checkpoint_(\d+)(?:$|[_\-.])")
 REQUIRED_PACKAGE_FIELDS = {
     "task_id",
     "trajectory_id",
@@ -28,14 +29,16 @@ REQUIRED_PACKAGE_FIELDS = {
     "test_command",
     "runtime_environment_id",
     "agent_run_manifest_path",
+    "base_tests_sha256",
 }
 
 
 def sha256_tree(root: Path) -> str:
     """Hash a directory deterministically, including relative filenames."""
     digest = hashlib.sha256()
-    for path in sorted(item for item in root.rglob("*") if item.is_file()):
-        digest.update(path.relative_to(root).as_posix().encode())
+    files = (item for item in root.rglob("*") if item.is_file())
+    for path in sorted(files, key=lambda item: item.relative_to(root).as_posix()):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
         digest.update(b"\0")
         with path.open("rb") as handle:
             for block in iter(lambda: handle.read(1024 * 1024), b""):
@@ -43,15 +46,34 @@ def sha256_tree(root: Path) -> str:
     return digest.hexdigest()
 
 
-def copy_visible_tests(source: Path, destination: Path, checkpoint_number: int) -> None:
-    """Copy shared helpers plus test_checkpoint_1..N, excluding future tests."""
+def copy_visible_tests(
+    source: Path,
+    destination: Path,
+    task: str,
+    checkpoint_number: int,
+) -> None:
+    """Copy legal tests while removing hidden, excluded, and future test data."""
     for item in source.rglob("*"):
         if not item.is_file():
+            continue
+        relative = item.relative_to(source)
+        parts = relative.parts
+        if any(part.lower() == "hidden" for part in parts):
+            continue
+        if task == "file_backup" and any(part.lower() == "errors" for part in parts):
+            continue
+        future_data = False
+        for part in parts:
+            match = CHECKPOINT_COMPONENT.match(part.lower())
+            if match and int(match.group(1)) > checkpoint_number:
+                future_data = True
+                break
+        if future_data:
             continue
         match = CHECKPOINT_TEST.search(item.name)
         if match and int(match.group(1)) > checkpoint_number:
             continue
-        target = destination / item.relative_to(source)
+        target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(item, target)
 
@@ -79,7 +101,9 @@ def package_checkpoint(
     shutil.copytree(snapshot, package_dir / "workspace", dirs_exist_ok=False)
     shutil.copy2(specification, package_dir / "specification.md")
     shutil.copy2(problem_dir / "config.yaml", package_dir / "problem_config.yaml")
-    copy_visible_tests(problem_dir / "tests", package_dir / "base_tests", checkpoint_number)
+    copy_visible_tests(
+        problem_dir / "tests", package_dir / "base_tests", task, checkpoint_number
+    )
 
     source_hash = sha256_tree(package_dir / "workspace")
     tests_hash = sha256_tree(package_dir / "base_tests")

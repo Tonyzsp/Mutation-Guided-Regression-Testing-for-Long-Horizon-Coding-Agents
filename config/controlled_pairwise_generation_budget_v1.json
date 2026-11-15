@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "budget_id": "controlled-pairwise-v1-gpt-6-luna-medium-1call-4096out-1candidate-repeat3-targetrepeat3",
+  "scope": "One Vanilla and one Mutation-Guided generation call for each preregistered mutant; one candidate maximum per call.",
+  "prompt_template_version": "controlled_pairwise_v1",
+  "require_generation_assessment": true,
+  "output_schema": "schemas/codex-generated-test-candidates-gap-v2.schema.json",
+  "model": {
+    "provider": "openai_codex",
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "temperature": null,
+    "decoding_note": "Codex CLI does not expose a temperature override; both conditions use the same service default.",
+    "model_config_id": "openai-codex-gpt-6-luna-medium-controlled-pairwise-v1"
+  },
+  "budget": {
+    "max_calls": 1,
+    "max_output_tokens": 4096,
+    "per_call_output_tokens": 4096,
+    "max_candidates": 1,
+    "candidate_unit": "one candidate file with exactly one top-level pytest test function",
+    "binding_dimensions": ["max_calls", "max_candidates"],
+    "repair_calls": 0,
+    "attempt_policy": "One generation call per method and mutant; a completed response, including an empty test list, is never retried. A process failure before a model request may be retried once only if the run record confirms no request was sent.",
+    "token_usage_policy": "Record service-reported token usage when available. Both methods receive the same per-call requested output budget. No token usage is inferred when the CLI does not report it."
+  },
+  "validation": {
+    "repeat_runs": 3,
+    "target_repeat_runs": 3,
+    "flakiness_rule": "A valid targeted test must collect, pass the original C1 implementation in all three runs, fail the exact target mutant in all three fresh mutant runs, and have a blind specification review verdict of correct.",
+    "correctness_rule": "A method-blind reviewer sees only the current C1 specification, the complete legal base suite, and anonymized candidate test code. Uncertain verdicts are not counted as valid until manually resolved.",
+    "base_suite_rule": "Use the repeated C1 baseline audit and preserve any stable source-checkpoint failures without allowing a generated candidate to introduce a new failure.",
+    "guided_rule": "Each Guided call receives one target mutant diff only. Vanilla receives no mutant ID, location, diff, later checkpoint, or regression result. Both candidate conditions are evaluated against the same target mutant."
+  },
+  "data_policy": {
+    "generator_input_root": "data/checkpoints/checkpoint_packages_rq1_full_36x1/<task>/C1/",
+    "hidden_and_future_data": "never supplied to generation, review, triage, or validation",
+    "file_backup_errors": "excluded from the released legal base_tests packages and isolated under data/excluded_tests per the Release isolation manifest",
+    "trajectory_provenance": "The Release snapshots and per-checkpoint agent_run_manifest.json are treated as the frozen C1 trajectories; raw conversation transcripts are not present in the Release"
+  }
+}

@@ -21,6 +21,7 @@ RUNTIME_CONFIG = REPO_ROOT / "config" / "checkpoint_runtime.json"
 CONTAINER_WORKSPACE = "/workspace"
 MUTMUT_BIN = "/opt/mutmut-env/bin/mutmut"
 MUTMUT_HITS_PATH = f"{CONTAINER_WORKSPACE}/mutmut-subprocess-hits.jsonl"
+MUTATION_PROTOCOL_VERSION = "rq1-mutmut-v3"
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -136,6 +137,8 @@ def build_mutmut_table(
         "[tool.mutmut]",
         f"source_paths = {json.dumps(source_paths)}",
         f"also_copy = {json.dumps([test_directory.rstrip('/') + '/', 'mutmut_subprocess_bridge.py'])}",
+        "max_stack_depth = 8",
+        "mutate_only_covered_lines = false",
         f"debug = {str(debug).lower()}",
         "pytest_add_cli_args = "
         + json.dumps(
@@ -164,6 +167,10 @@ def write_run_results(
     bridge_hashes: dict[str, str],
     test_selection: list[str] | None,
     baseline_audit_path: str | None,
+    max_children: int,
+    mutmut_table: str,
+    docker_image_id: str,
+    mutant_selection: list[str],
 ) -> dict[str, Any]:
     run_log = runtime_dir / "mutmut-run.log"
     run_log.write_text(
@@ -186,8 +193,36 @@ def write_run_results(
     for status in statuses:
         status_counts[status] = status_counts.get(status, 0) + 1
 
+    mutation_config = {
+        "protocol_version": MUTATION_PROTOCOL_VERSION,
+        "mutmut_version": "3.8.0",
+        "runtime_config_sha256": sha256_file(RUNTIME_CONFIG),
+        "docker_image": runtime_manifest.get("docker_image"),
+        "docker_image_id": docker_image_id,
+        "source_paths": list(source_hashes),
+        "source_sha256": source_hashes,
+        "base_tests_sha256": runtime_manifest.get("base_tests_sha256"),
+        "validation_suite_sha256": runtime_manifest.get("validation_suite_sha256"),
+        "test_selection": test_selection,
+        "bridge_sha256": bridge_hashes,
+        "max_children": max_children,
+        "mutant_selection": mutant_selection,
+        "mutmut_table": mutmut_table,
+        "task_runtime_profile": runtime_manifest.get("task_runtime_profile"),
+        "container_setup_commands": runtime_manifest.get("container_setup_commands"),
+        "asset_mounts_read_only": runtime_manifest.get("asset_mounts_read_only", []),
+        "requirements_sha256": sha256_file(runtime_dir / "requirements.txt")
+        if (runtime_dir / "requirements.txt").is_file()
+        else None,
+    }
+    mutation_config_sha256 = hashlib.sha256(
+        json.dumps(mutation_config, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     record = {
         "format": "rq1-checkpoint-mutmut-run/v1",
+        "mutation_protocol_version": MUTATION_PROTOCOL_VERSION,
+        "mutation_config": mutation_config,
+        "mutation_config_sha256": mutation_config_sha256,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "task_id": runtime_manifest["task_id"],
         "checkpoint_id": runtime_manifest["checkpoint_id"],
@@ -219,11 +254,16 @@ def write_run_results(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    run_mode = parser.add_mutually_exclusive_group(required=True)
+    run_mode.add_argument(
         "--runtime-dir",
-        required=True,
         type=Path,
-        help="Existing staging directory created by prepare_checkpoint_runtime.py",
+        help="Staging directory created by prepare_checkpoint_runtime.py",
+    )
+    run_mode.add_argument(
+        "--resume-mutmut-dir",
+        type=Path,
+        help="Resume an existing isolated mutmut workspace created by this script",
     )
     parser.add_argument("--max-children", type=int, default=4)
     parser.add_argument("--mutant", action="append", default=[], help="Run only this mutant; repeatable")
@@ -235,26 +275,50 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    source_runtime_dir = args.runtime_dir.resolve(strict=True)
     allowed_root = (REPO_ROOT / "tmp").resolve(strict=True)
-    if not source_runtime_dir.is_relative_to(allowed_root):
-        raise ValueError(f"runtime directory must remain under {allowed_root}")
     if args.max_children < 1:
         raise ValueError("--max-children must be positive")
     for name in args.mutant:
         if re.fullmatch(r"[A-Za-z0-9_.:-]+", name) is None:
             raise ValueError(f"invalid mutant name: {name!r}")
 
-    runtime_manifest_path = source_runtime_dir / "runtime_manifest.json"
+    if args.resume_mutmut_dir is not None:
+        runtime_dir = args.resume_mutmut_dir.resolve(strict=True)
+        if not runtime_dir.is_relative_to(allowed_root) or "-mutmut-" not in runtime_dir.name:
+            raise ValueError(f"resume directory must be an isolated mutmut workspace under {allowed_root}")
+        runtime_manifest_path = runtime_dir / "runtime_manifest.json"
+        runtime_manifest = read_json(runtime_manifest_path)
+        if runtime_manifest.get("format") != "rq1-checkpoint-runtime/v1":
+            raise ValueError(f"unsupported runtime manifest: {runtime_manifest_path}")
+        source_runtime_dir = Path(runtime_manifest.get("source_runtime_directory", "")).resolve(strict=True)
+        if not source_runtime_dir.is_relative_to(allowed_root):
+            raise ValueError(f"source runtime directory must remain under {allowed_root}")
+        recorded_stage = Path(runtime_manifest.get("staging_directory", "")).resolve(strict=False)
+        if recorded_stage != runtime_dir:
+            raise ValueError("runtime manifest does not identify this mutmut workspace as its staging directory")
+    else:
+        source_runtime_dir = args.runtime_dir.resolve(strict=True)
+        if not source_runtime_dir.is_relative_to(allowed_root):
+            raise ValueError(f"runtime directory must remain under {allowed_root}")
+        runtime_manifest_path = source_runtime_dir / "runtime_manifest.json"
+        runtime_manifest = read_json(runtime_manifest_path)
+        if runtime_manifest.get("format") != "rq1-checkpoint-runtime/v1":
+            raise ValueError(f"unsupported runtime manifest: {runtime_manifest_path}")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        runtime_dir = source_runtime_dir.parent / f"{source_runtime_dir.name}-mutmut-{stamp}"
+        if not runtime_dir.is_relative_to(allowed_root):
+            raise ValueError(f"mutmut workspace must remain under {allowed_root}")
+        copy_to_clean_mutmut_workspace(source_runtime_dir, runtime_dir)
+        runtime_manifest["source_runtime_directory"] = str(source_runtime_dir)
+        runtime_manifest["staging_directory"] = str(runtime_dir)
+        (runtime_dir / "runtime_manifest.json").write_text(
+            json.dumps(runtime_manifest, indent=2) + "\n", encoding="utf-8"
+        )
+
+    runtime_manifest_path = runtime_dir / "runtime_manifest.json"
     runtime_manifest = read_json(runtime_manifest_path)
     if runtime_manifest.get("format") != "rq1-checkpoint-runtime/v1":
         raise ValueError(f"unsupported runtime manifest: {runtime_manifest_path}")
-
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    runtime_dir = source_runtime_dir.parent / f"{source_runtime_dir.name}-mutmut-{stamp}"
-    if not runtime_dir.is_relative_to(allowed_root):
-        raise ValueError(f"mutmut workspace must remain under {allowed_root}")
-    copy_to_clean_mutmut_workspace(source_runtime_dir, runtime_dir)
     runtime_manifest["source_runtime_directory"] = str(source_runtime_dir)
     runtime_manifest["staging_directory"] = str(runtime_dir)
     (runtime_dir / "runtime_manifest.json").write_text(
@@ -358,7 +422,7 @@ def main() -> int:
     replace_mutmut_table(pyproject, table)
 
     hits_file = runtime_dir / "mutmut-subprocess-hits.jsonl"
-    if hits_file.exists():
+    if hits_file.exists() and args.resume_mutmut_dir is None:
         hits_file.unlink()
 
     image = str(runtime_manifest["docker_image"])
@@ -434,6 +498,10 @@ def main() -> int:
         bridge_hashes=bridge_hashes,
         test_selection=test_selection,
         baseline_audit_path=baseline_audit_path,
+        max_children=args.max_children,
+        mutmut_table=table,
+        docker_image_id=actual_image_id,
+        mutant_selection=list(args.mutant),
     )
     record["docker_image_id"] = actual_image_id
     (runtime_dir / "mutmut_run_manifest.json").write_text(

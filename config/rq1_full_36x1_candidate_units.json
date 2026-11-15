@@ -1,0 +1,678 @@
+{
+  "format": "rq1-candidate-unit-manifest/v1",
+  "created_at_utc": "2026-10-19T09:32:36.181861+00:00",
+  "dataset": "rq1_full_36x1",
+  "selection_rule": "Use C1 as the single source checkpoint for each trajectory; list every later checkpoint as a potential target. Generation inputs are restricted to that C1 package. This prepares the full 36-trajectory long-horizon comparison without opening future checkpoint contents.",
+  "package_root": "C:\\Users\\31624\\OneDrive\\Desktop\\Mutation\\Mutation-Guided-Regression-Testing-for-Long-Horizon-Coding-Agents\\data\\checkpoints\\checkpoint_packages_rq1_full_36x1",
+  "package_audit": "OK 196 packages across 36 tasks\nOK workspace and base-test hashes match package metadata\nOK no hidden, deferred file_backup/errors, or future test files in generator inputs\nOK package base-test hashes match the isolation manifest",
+  "package_count": 196,
+  "task_count": 36,
+  "candidate_unit_count": 36,
+  "units": [
+    {
+      "unit_id": "cfgpipe/C1",
+      "task_id": "cfgpipe",
+      "trajectory_id": "rq1_full_36x1/cfgpipe",
+      "source_checkpoint": "C1",
+      "source_package": "cfgpipe/C1",
+      "source_package_json_sha256": "6fd91ee9abdb007c17744348c2e7bcde5c21183cb2c2b155e697a8897871e2f8",
+      "workspace_revision": "0834e9d16f68f7463892f71074eb5ebf4402ceb9454cb7b8927245f75099b76c",
+      "base_tests_sha256": "606b279ff6f166ab79063df48398ba8c6e8151ab81610f90fa0cf757c3c9f956",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "circuit_eval/C1",
+      "task_id": "circuit_eval",
+      "trajectory_id": "rq1_full_36x1/circuit_eval",
+      "source_checkpoint": "C1",
+      "source_package": "circuit_eval/C1",
+      "source_package_json_sha256": "c60d8ef27c95fc16e71d22f152a221208c4ff1453f633e82091f12472ebc5c1e",
+      "workspace_revision": "302bbd563a81dc5c7e38342ca0504d7b8d63fe7178b3ffa01e5b754f74ef7bde",
+      "base_tests_sha256": "08573eef69a5cd25fa9e7ea2b44cf14af8d0d941922dd561205bfb4bbaeb1718",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C8"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "code_search/C1",
+      "task_id": "code_search",
+      "trajectory_id": "rq1_full_36x1/code_search",
+      "source_checkpoint": "C1",
+      "source_package": "code_search/C1",
+      "source_package_json_sha256": "8c97632437163298d647bb98f92a75997979440fb48b01f4079e928076c6af07",
+      "workspace_revision": "3e532a51f7cafa2683104c3039f10424da81b13eb8d63189388f8dccfcf3cc4b",
+      "base_tests_sha256": "db9b9994f0f5a46d92c4f1f42d914f5d502acc40b447f6363174ef393962e34b",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "dag_execution/C1",
+      "task_id": "dag_execution",
+      "trajectory_id": "rq1_full_36x1/dag_execution",
+      "source_checkpoint": "C1",
+      "source_package": "dag_execution/C1",
+      "source_package_json_sha256": "a6cfa799010107e8e74897a4986dd0f004143b45d1f98c999fffd1ed5a107e6a",
+      "workspace_revision": "12808b7ad2e47f7a7755a5824dac579de9cc7e65624dbbfeb4cc14aa34d77cbc",
+      "base_tests_sha256": "e818266c6bfc358137c5cb2c6722d426f1f0029605d9a9a5617ba88f85443384",
+      "target_checkpoints": [
+        "C2",
+        "C3"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "database_migration/C1",
+      "task_id": "database_migration",
+      "trajectory_id": "rq1_full_36x1/database_migration",
+      "source_checkpoint": "C1",
+      "source_package": "database_migration/C1",
+      "source_package_json_sha256": "49122f857f8c1c9636b100f1ed8b39a17a2b0891b9ade112321e3e7262d70aee",
+      "workspace_revision": "00ee8f7f5059dbc0024db76e27d32fcb98c264e81cceeec9771fbff88dad1915",
+      "base_tests_sha256": "81fdcbedfbfe7988f46985238a41a176d3e33a6e8167a92e7d2d9cb7101b5c9d",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "datagate/C1",
+      "task_id": "datagate",
+      "trajectory_id": "rq1_full_36x1/datagate",
+      "source_checkpoint": "C1",
+      "source_package": "datagate/C1",
+      "source_package_json_sha256": "ac5611610245fc53506053fef537cc79a27f4a5e75f8f6e1b0e8468ad755f87c",
+      "workspace_revision": "75a7fd983f7d2a40417fce7accef800cbcc61823916886591fd4d3515b25a971",
+      "base_tests_sha256": "449399b5023e6e849310c920c3592c54a8bf6c839e1345613f0c7c8356bda60d",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "dynamic_buffer/C1",
+      "task_id": "dynamic_buffer",
+      "trajectory_id": "rq1_full_36x1/dynamic_buffer",
+      "source_checkpoint": "C1",
+      "source_package": "dynamic_buffer/C1",
+      "source_package_json_sha256": "0b66bdff38d2eaa769e7025286cb8806182d96abf6a28c8b684bd76fd39e52d7",
+      "workspace_revision": "7728a39cd6bf2cb08d8bc16932fbc47e376a4a974038a2642a30a58bde4bdb3b",
+      "base_tests_sha256": "44e8c235cbf6d4b7edccd09ae715d332827822befd9e3bfc7e3aaffa4778a429",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "dynamic_config_service_api/C1",
+      "task_id": "dynamic_config_service_api",
+      "trajectory_id": "rq1_full_36x1/dynamic_config_service_api",
+      "source_checkpoint": "C1",
+      "source_package": "dynamic_config_service_api/C1",
+      "source_package_json_sha256": "6d8afa3d54e7109ed26a5d96824fb00d15138c99e492fb02d82bb4a0e30a81c8",
+      "workspace_revision": "f2c79d07a116c8c7894d790a3ed1cc967b39b945ec246c39394952149c7142d0",
+      "base_tests_sha256": "d1ebff4da584614462484a5e09b019fada30936a7d564932131099038bd13790",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "env_manager/C1",
+      "task_id": "env_manager",
+      "trajectory_id": "rq1_full_36x1/env_manager",
+      "source_checkpoint": "C1",
+      "source_package": "env_manager/C1",
+      "source_package_json_sha256": "7c3a61331fca0cf288ef5ed26670f88030dd84ca8ce0434bfe0e2e3d111b6166",
+      "workspace_revision": "944dc632ad178e3d2b7e9fcaaec014b074a34af7ccf26194b41f7000db21526f",
+      "base_tests_sha256": "3005391291ad678074e761d0d9f6a742979688dd72aa05ba52f1ba6efee1c8e1",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "etl_pipeline/C1",
+      "task_id": "etl_pipeline",
+      "trajectory_id": "rq1_full_36x1/etl_pipeline",
+      "source_checkpoint": "C1",
+      "source_package": "etl_pipeline/C1",
+      "source_package_json_sha256": "957b9c6a420b3d8f71503f6dbdb505dd4ac3145181ef3307807656dd54f3dc6c",
+      "workspace_revision": "2afb19c75fbbd19b8996b1dde13caa8e688aa52be8b788c5822e1407180a149f",
+      "base_tests_sha256": "4383ac8039ee30b243704a3657bcf8d3ba1b464ce27908c7ac54741fec7583a3",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "eve_industry/C1",
+      "task_id": "eve_industry",
+      "trajectory_id": "rq1_full_36x1/eve_industry",
+      "source_checkpoint": "C1",
+      "source_package": "eve_industry/C1",
+      "source_package_json_sha256": "8958c4f837cb85d431044318ff7c0476f7399c986d5f06f8463ed4b2e8718088",
+      "workspace_revision": "59356e0cd83bfcf168eddafe29d53223453c4fd5397afcf8e3ea2e18def04a33",
+      "base_tests_sha256": "7c6ed97cd2a8ba7fe248a991c68ba6870e9918ee5ba9744c60a00027ea813625",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "eve_jump_planner/C1",
+      "task_id": "eve_jump_planner",
+      "trajectory_id": "rq1_full_36x1/eve_jump_planner",
+      "source_checkpoint": "C1",
+      "source_package": "eve_jump_planner/C1",
+      "source_package_json_sha256": "07f9a51b381b81089f6d0fce8045741fa868515be7c6523a676bdcaaac052cab",
+      "workspace_revision": "53229cd4d52d49cfcd0f79541b777e76c53a7afc1a5963c99b930ac379442f35",
+      "base_tests_sha256": "a174fb8b8c01848f8512b7de91f26bfce028f4e60596bfba7d6441562e3be667",
+      "target_checkpoints": [
+        "C2",
+        "C3"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "eve_market_tools/C1",
+      "task_id": "eve_market_tools",
+      "trajectory_id": "rq1_full_36x1/eve_market_tools",
+      "source_checkpoint": "C1",
+      "source_package": "eve_market_tools/C1",
+      "source_package_json_sha256": "32df5dc230d68431e8f6bff8090daea30323486bbcd92ba371f2cf3e2409cd7b",
+      "workspace_revision": "574aae35e18e2ae13f2ee646c3012149666f9b79cd21be007e553ff7934c4f24",
+      "base_tests_sha256": "13e0eb606f111cf7f8546b1b7b5cef721d816253289e625977f608c6235ab19b",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "eve_route_planner/C1",
+      "task_id": "eve_route_planner",
+      "trajectory_id": "rq1_full_36x1/eve_route_planner",
+      "source_checkpoint": "C1",
+      "source_package": "eve_route_planner/C1",
+      "source_package_json_sha256": "3a7ce8f03267039fadf5850ac09e7a281a779f6d01504eb57cc880357861ae35",
+      "workspace_revision": "0e70d79f9510c55c5e2793c521a0dca0f0debb771acc333a1520fb36d4fbf9d1",
+      "base_tests_sha256": "7e0ff1bd5d4ace38ef397f47b1dd8453fd92a129bfadbbdf2ddae63564046e29",
+      "target_checkpoints": [
+        "C2",
+        "C3"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "execution_server/C1",
+      "task_id": "execution_server",
+      "trajectory_id": "rq1_full_36x1/execution_server",
+      "source_checkpoint": "C1",
+      "source_package": "execution_server/C1",
+      "source_package_json_sha256": "a1dc23f6fc3b77b8662a66c99e83b29b03033b623926bdc52b20acb99f1254f3",
+      "workspace_revision": "c11ffb6fb5075af3f4ac41289870c996262b75a6962968119ca046c9701a8cea",
+      "base_tests_sha256": "15a7b7a9d9ed5ead80d5856a98612bb0c7d33d985f016377de0713a1439aabfd",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "file_backup/C1",
+      "task_id": "file_backup",
+      "trajectory_id": "rq1_full_36x1/file_backup",
+      "source_checkpoint": "C1",
+      "source_package": "file_backup/C1",
+      "source_package_json_sha256": "26e57e96c8711ed7b29423c697f097bdd2473c93a29225622c26da5223075223",
+      "workspace_revision": "883005c65528793cb0023ba8c57d9a0e9bff5224453c55e6f14bdc1a6818de46",
+      "base_tests_sha256": "567e4f4069ec0aad861369ce1e252761bab1166b4ef3fdfc3834d232d7e6a0a2",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "file_merger/C1",
+      "task_id": "file_merger",
+      "trajectory_id": "rq1_full_36x1/file_merger",
+      "source_checkpoint": "C1",
+      "source_package": "file_merger/C1",
+      "source_package_json_sha256": "e35a51b6d12c62dd150e02242f3d0b76c3b10d2104f04b732230e15a91c058eb",
+      "workspace_revision": "69e8836faed2f9d078101f1344b20f6dc714034c66f81c5611116e048fc84a0f",
+      "base_tests_sha256": "05af777bf50d19ead9308228de5876ccd5aac6c1104273a532fd02513934bc63",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "file_query_tool/C1",
+      "task_id": "file_query_tool",
+      "trajectory_id": "rq1_full_36x1/file_query_tool",
+      "source_checkpoint": "C1",
+      "source_package": "file_query_tool/C1",
+      "source_package_json_sha256": "833fce17128bfffed529a08782dfb37445df155a3c552f6789e80173a16d4b69",
+      "workspace_revision": "eb2fdc4aa9d7e6fad5b8146187c7c195dafb1d83002b9493cc2df11ec2840573",
+      "base_tests_sha256": "05498869356fd1f0b4aaa1d9afb9179ba71eaa7bdeeee97574596a0292975684",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "forge/C1",
+      "task_id": "forge",
+      "trajectory_id": "rq1_full_36x1/forge",
+      "source_checkpoint": "C1",
+      "source_package": "forge/C1",
+      "source_package_json_sha256": "b09bf37bb01ee31a4f53ce2b3f8c0d80cf12a5044dc20d5e6e08fb0b0e76ffb3",
+      "workspace_revision": "1bb16910b40ad0b85850e98b847dc588741d50380b6997e3397da8f292993250",
+      "base_tests_sha256": "e2c570578b03b15cfe3373b7937a9ce0a69914232a8d95925fe62b015c7253a8",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C8"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "l2m/C1",
+      "task_id": "l2m",
+      "trajectory_id": "rq1_full_36x1/l2m",
+      "source_checkpoint": "C1",
+      "source_package": "l2m/C1",
+      "source_package_json_sha256": "351323fcc4549f118f0de46a086425bbb957180944dd7781b070ca23b2712ef4",
+      "workspace_revision": "bfef3e7be4994bca10e44487e953a559cf828bcbb36e1b1ab994110d86105332",
+      "base_tests_sha256": "b44d2270fc8e8cbe329f04dd6f343106d781a1e97dbd6d71709130f43555d2b1",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "layered_config_synthesizer/C1",
+      "task_id": "layered_config_synthesizer",
+      "trajectory_id": "rq1_full_36x1/layered_config_synthesizer",
+      "source_checkpoint": "C1",
+      "source_package": "layered_config_synthesizer/C1",
+      "source_package_json_sha256": "ff757a25ecf26770881e6dfb020ebc93da5cea5e2bf2bb8081a7dc30887cb106",
+      "workspace_revision": "8be3155e87b05eb7e25c1303282f1436ca472282e5ebba067918b55761733ece",
+      "base_tests_sha256": "205a661b460ae7bc084eb4c21730cc9dff41f7d07fdc67e697a88325bdc6e79f",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "log_query/C1",
+      "task_id": "log_query",
+      "trajectory_id": "rq1_full_36x1/log_query",
+      "source_checkpoint": "C1",
+      "source_package": "log_query/C1",
+      "source_package_json_sha256": "d75d6a3dd971b1645ce0ba3a98e0256449d1fd9e4176f43bdc33e5ab53bf25ba",
+      "workspace_revision": "121e5181706114a1a2ded3db9e050a485526ca2eb67e8329c360aa0d5e6b7651",
+      "base_tests_sha256": "52f6c2718e1db942301d7ed9e3a3d26e0a23c116601b8ce365add5ce5e43b2fc",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "meshctl/C1",
+      "task_id": "meshctl",
+      "trajectory_id": "rq1_full_36x1/meshctl",
+      "source_checkpoint": "C1",
+      "source_package": "meshctl/C1",
+      "source_package_json_sha256": "4af0f0c3409ffae83bd06f4d777a5c6e6312d0147adfd8d6ae914c638d2120aa",
+      "workspace_revision": "36a11de32385735e1d1c30d7f06c0c5288702c5b07bfcaf998ff786b8d27f095",
+      "base_tests_sha256": "046e852aa478c3ccbb41bcfc5c957fdcd3ee082bc124245db8c6c26944bd8951",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C8"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "metric_transform_lang/C1",
+      "task_id": "metric_transform_lang",
+      "trajectory_id": "rq1_full_36x1/metric_transform_lang",
+      "source_checkpoint": "C1",
+      "source_package": "metric_transform_lang/C1",
+      "source_package_json_sha256": "533b1a662cfaed2b8670b46ff6b0dda4920d23933114c50be244124be3be93f6",
+      "workspace_revision": "65dd0e36f3835a306d69987cc70699f541780e2e164414959b0d9e1aeea91dcc",
+      "base_tests_sha256": "8a295f5ba227e0964a393e0bef52bcc17ae83865b193d2eed640e48a028236a6",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "migrate_configs/C1",
+      "task_id": "migrate_configs",
+      "trajectory_id": "rq1_full_36x1/migrate_configs",
+      "source_checkpoint": "C1",
+      "source_package": "migrate_configs/C1",
+      "source_package_json_sha256": "a4ef37fd0c8366c3b4f4bf8d1922018db7a87e92c6dd1714fb049b9c7e63e1e7",
+      "workspace_revision": "0774b6527d320e1ce3dd37b50ac17d2a1a5d7725363f77b4700a3932f25224a2",
+      "base_tests_sha256": "02b3b4c96b4fe573d36df89257356d34ea490615ea3845c57c7ddfb2b2780236",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "mocked_http/C1",
+      "task_id": "mocked_http",
+      "trajectory_id": "rq1_full_36x1/mocked_http",
+      "source_checkpoint": "C1",
+      "source_package": "mocked_http/C1",
+      "source_package_json_sha256": "476f07cbf68baa92fd43cdffbdb5866687f7bc36dfe3644051aebbeb53027f07",
+      "workspace_revision": "f042d2f85e228debbbe01be3ac79c2b4f89591ed6900d4bee29e478274a26378",
+      "base_tests_sha256": "0624bff7e0bc96b26f6e929e7016f0e88e51bc0a22a777884494f9e39b07fd59",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C8"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "mvvault/C1",
+      "task_id": "mvvault",
+      "trajectory_id": "rq1_full_36x1/mvvault",
+      "source_checkpoint": "C1",
+      "source_package": "mvvault/C1",
+      "source_package_json_sha256": "d28e3593c9de951c487e88eece68d286510c4747aee52bb6bd50da994762eef9",
+      "workspace_revision": "9ef3cbca8ba710de9ee4955e75a3fe086fe21b48d575e0b9769fb0d806577a48",
+      "base_tests_sha256": "6f956af7b5458eb1b9be530249ae15b664f64b4fac3c531d044abc7f691965eb",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "pwd_manager/C1",
+      "task_id": "pwd_manager",
+      "trajectory_id": "rq1_full_36x1/pwd_manager",
+      "source_checkpoint": "C1",
+      "source_package": "pwd_manager/C1",
+      "source_package_json_sha256": "99887a1f94bd85024b7a4064743c9edf4fb1f69bd57f8a71a28e25f8ab7eb656",
+      "workspace_revision": "367af7c2b2fb6d9bdfd86c6c4121f6d97ad8184c6db2132c0a376e6798cae396",
+      "base_tests_sha256": "db840faf7353f4d9ff11b6a1d6e88cd3ed13db6857311a050db274020c76658a",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "recli/C1",
+      "task_id": "recli",
+      "trajectory_id": "rq1_full_36x1/recli",
+      "source_checkpoint": "C1",
+      "source_package": "recli/C1",
+      "source_package_json_sha256": "cb2f6c0ad3ce95e0330eb67a1349c0120159fffeb2daa4d09ed4bde564950a53",
+      "workspace_revision": "c3117767b55135517eaa276026419191bc93e6d0ad5a93f9a0d1d1dc505de8f9",
+      "base_tests_sha256": "ddfeca55edae6f19d0d70f6ff48dd92a9766a73fc83e79cb4f2673c05ded93e5",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C8"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "rejector/C1",
+      "task_id": "rejector",
+      "trajectory_id": "rq1_full_36x1/rejector",
+      "source_checkpoint": "C1",
+      "source_package": "rejector/C1",
+      "source_package_json_sha256": "c7572fd158f2311d0dc4d0dd7581ff60af1e8f1643eb2143fab61d9d46525080",
+      "workspace_revision": "556e7a0394b06c093cddb317bbfd2f58ef47bd2d590ba711670f02e4d8a4029c",
+      "base_tests_sha256": "ecd414bb48bad8d814145f95ab92aec51cbe7d36209ddd4392d4a611f5186331",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "sheeteval/C1",
+      "task_id": "sheeteval",
+      "trajectory_id": "rq1_full_36x1/sheeteval",
+      "source_checkpoint": "C1",
+      "source_package": "sheeteval/C1",
+      "source_package_json_sha256": "ea7a17e8ba0a554d36ba34daeac7c15460034fb4198da9840f757fb9052c3cb7",
+      "workspace_revision": "b921720785555e64948192634ab8cc337cb21719c937ee3e9bc97882a28dce77",
+      "base_tests_sha256": "0c94f6834d377adee8bd137051ea51883e3ef46fc67d8c0affcae22496aa965a",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "sith/C1",
+      "task_id": "sith",
+      "trajectory_id": "rq1_full_36x1/sith",
+      "source_checkpoint": "C1",
+      "source_package": "sith/C1",
+      "source_package_json_sha256": "7c830daba34aa1c0e0b99e449c479fdb67b2e36dc9eb47d254400901e1a0cb3b",
+      "workspace_revision": "524f86578a7efe0d7e6c79e39cd39574ae4eba2a35c0b4dc8f80bbe2f61b101b",
+      "base_tests_sha256": "47e3bb4cf4c6dd6a25eff9bfd51e15eee47e0eb83751ac4cc8ff97320da031ef",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "test_translator/C1",
+      "task_id": "test_translator",
+      "trajectory_id": "rq1_full_36x1/test_translator",
+      "source_checkpoint": "C1",
+      "source_package": "test_translator/C1",
+      "source_package_json_sha256": "921869b78d296719eab29e9c69532b0e58223fbfbaf0fa9743997807450d09c8",
+      "workspace_revision": "39e2b14e7ea38e01fdc1b0413613200beb55677f6aeb7f53f917ea8516d33a6e",
+      "base_tests_sha256": "6d47bbb4920dbad502e1f7f1115a4009300eb65035d29cf357170a01b4dd4aa4",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7",
+        "C8"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "textdrop/C1",
+      "task_id": "textdrop",
+      "trajectory_id": "rq1_full_36x1/textdrop",
+      "source_checkpoint": "C1",
+      "source_package": "textdrop/C1",
+      "source_package_json_sha256": "0840f09272af88d731c2691f5cd972ce59a2fa5f91b7cb0c04f955944a6830d2",
+      "workspace_revision": "ba80b7be9bb1e826c8428abaa0aece2379c9e749593b4f58cbdfb33ce24b5953",
+      "base_tests_sha256": "dcbfa6e38562651940f312e7b05a36887e443137a557563654b194c6a864b55e",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "trajectory_api/C1",
+      "task_id": "trajectory_api",
+      "trajectory_id": "rq1_full_36x1/trajectory_api",
+      "source_checkpoint": "C1",
+      "source_package": "trajectory_api/C1",
+      "source_package_json_sha256": "0d813bfd17ee705bfb0bdf662a76f40033a2a834afd9eef0a365efe7d16f0215",
+      "workspace_revision": "d35e5c65e25ec537b7aa86d375419a4f90db1cdd5738e166b14a9436cdddbaf8",
+      "base_tests_sha256": "768de17984ee78349e914882cc85e9d3c4772ffb32cb6a8bc3ddcbdf6f4293e6",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    },
+    {
+      "unit_id": "xjq/C1",
+      "task_id": "xjq",
+      "trajectory_id": "rq1_full_36x1/xjq",
+      "source_checkpoint": "C1",
+      "source_package": "xjq/C1",
+      "source_package_json_sha256": "facf39afdd95a364c6f5520cf004129d347d906efc1e88844417cd173b18911d",
+      "workspace_revision": "9ce4d065787d46a28f3041b5a27e1a1bc08b4fc70bd6db388588bf999f5ed7aa",
+      "base_tests_sha256": "7ba89aaeb47a7856898e37c6b93035a00aca222b0a2f8494f5f5c0ce3054a77f",
+      "target_checkpoints": [
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "source_checkpoint_only_inputs": true,
+      "status": "prepared_not_evaluated"
+    }
+  ],
+  "evaluation_run": false
+}

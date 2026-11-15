@@ -46,6 +46,10 @@
       "enum": ["killed", "survived", "invalid", "unreachable", "suspected_equivalent", "inconclusive"]
     },
     "base_suite_reached_location": { "type": ["boolean", "null"] },
+    "target_function_reached_in_baseline": {
+      "description": "Whether stable passing base tests recorded a subprocess hit for the function containing this mutant; this is function-level evidence, not proof that the exact mutated line ran.",
+      "type": ["boolean", "null"]
+    },
     "review_status": { "enum": ["not_reviewed", "reviewed", "needs_review"] },
     "review_rationale": { "type": ["string", "null"] },
     "evidence_path": { "type": "string", "minLength": 1 },
