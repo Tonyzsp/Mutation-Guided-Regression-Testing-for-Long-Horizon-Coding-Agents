@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 UNITS_PATH = REPO_ROOT / "config" / "rq1_full_36x1_candidate_units.json"
 PACKAGE_ROOT = REPO_ROOT / "data" / "checkpoints" / "checkpoint_packages_rq1_full_36x1"
 BUDGET_PATH = REPO_ROOT / "config" / "generation_budget_rq1_c1_cohort_formal.json"
+STUDY_BUDGET_PATH = REPO_ROOT / "config" / "rq1_full_study_budget_v1.json"
 PROMPT_PATH = REPO_ROOT / "prompts" / "vanilla_gap_v4.md"
 GENERATOR = REPO_ROOT / "scripts" / "run_vanilla_generation.py"
 RESULTS_ROOT = REPO_ROOT / "artifacts" / "results" / "rq1_full_36x1"
@@ -28,11 +29,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--units", type=Path, default=UNITS_PATH)
     parser.add_argument("--budget-config", type=Path, default=BUDGET_PATH)
+    parser.add_argument("--study-budget-config", type=Path, default=STUDY_BUDGET_PATH)
     parser.add_argument("--prompt-template", type=Path, default=PROMPT_PATH)
-    parser.add_argument("--output-suffix", default="vanilla_formal_v4_20261019")
+    parser.add_argument("--output-suffix", default="vanilla_formal_v5_20261116")
+    parser.add_argument("--task", action="append", help="Limit to task IDs; may be repeated.")
     args = parser.parse_args()
 
-    units = read_json(args.units.resolve(strict=True))["units"]
+    all_units = read_json(args.units.resolve(strict=True))["units"]
+    unknown_tasks = sorted(set(args.task or []) - {unit["task_id"] for unit in all_units})
+    if unknown_tasks:
+        raise ValueError(f"unknown task ID(s): {unknown_tasks}")
+    units = [unit for unit in all_units if not args.task or unit["task_id"] in args.task]
     budget_id = read_json(args.budget_config.resolve(strict=True))["budget_id"]
     batch_dir = RESULTS_ROOT / f"cohort_logs_{args.output_suffix}"
     batch_dir.mkdir(parents=True, exist_ok=True)
@@ -90,6 +97,7 @@ def main() -> int:
                 "--package", str(package),
                 "--output-dir", str(generation_dir),
                 "--budget-config", str(args.budget_config.resolve(strict=True)),
+                "--study-budget-config", str(args.study_budget_config.resolve(strict=True)),
                 "--prompt-template", str(args.prompt_template.resolve(strict=True)),
                 "--opportunity-brief", str(brief),
             ]

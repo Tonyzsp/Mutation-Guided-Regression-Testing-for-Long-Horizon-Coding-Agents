@@ -147,6 +147,7 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--task", action="append", help="Limit to task IDs; may be repeated")
+    parser.add_argument("--resume", action="store_true", help="Resume a compatible partial audit directory.")
     args = parser.parse_args()
     if args.repeats < 1 or args.timeout_seconds < 1:
         raise ValueError("repeats and timeout must be positive")
@@ -163,14 +164,30 @@ def main() -> int:
         REPO_ROOT / "artifacts" / "results" / "rq1_full_36x1" / f"c1_base_audit_{stamp}"
     )
     allowed_results = (REPO_ROOT / "artifacts" / "results").resolve(strict=True)
-    if not output.is_relative_to(allowed_results) or output.exists():
-        raise ValueError(f"output must be a new directory beneath {allowed_results}")
-    output.mkdir(parents=True)
-
+    if not output.is_relative_to(allowed_results):
+        raise ValueError(f"output must be beneath {allowed_results}")
+    audit_path = output / "c1_base_suite_audit.json"
     records: list[dict[str, Any]] = []
+    if output.exists():
+        if not args.resume or not audit_path.is_file():
+            raise ValueError(f"output must be a new directory beneath {allowed_results}, or use --resume")
+        prior = read_json(audit_path)
+        if (
+            prior.get("dataset") != units_manifest["dataset"]
+            or prior.get("repeats") != args.repeats
+            or prior.get("problem_commit")
+            != read_json(REPO_ROOT / "config" / "benchmarks.lock.json")["benchmarks"]["slop_code_bench_problems"]["commit"]
+        ):
+            raise ValueError("existing audit is incompatible with the requested resume configuration")
+        records = list(prior.get("records", []))
+    else:
+        output.mkdir(parents=True)
+    completed_tasks = {str(record.get("task_id")) for record in records}
+    selected = [unit for unit in selected if unit["task_id"] not in completed_tasks]
     image = "rq1-b-tools:python312"
     image_id = docker_image_id(image)
-    for index, unit in enumerate(selected, start=1):
+    total_count = len(units_manifest["units"])
+    for index, unit in enumerate(selected, start=len(records) + 1):
         task_id = unit["task_id"]
         package = (package_root / unit["source_package"]).resolve(strict=True)
         record: dict[str, Any] = {
@@ -246,7 +263,7 @@ def main() -> int:
                 )
             records.append(record)
             print(
-                f"[{index}/{len(selected)}] {task_id}: {record['status']} "
+                f"[{index}/{total_count}] {task_id}: {record['status']} "
                 f"(pass={len(record.get('stable_pass_test_ids', []))}, "
                 f"fail={len(record.get('stable_fail_test_ids', []))}, "
                 f"unstable={len(record.get('unstable_test_ids', []))})",
@@ -255,7 +272,7 @@ def main() -> int:
         except Exception as error:  # Preserve per-unit failures and continue the cohort audit.
             record["error"] = f"{type(error).__name__}: {error}"
             records.append(record)
-            print(f"[{index}/{len(selected)}] {task_id}: runtime_error ({record['error']})", flush=True)
+            print(f"[{index}/{total_count}] {task_id}: runtime_error ({record['error']})", flush=True)
 
         snapshot = {
             "format": "rq1-c1-base-suite-audit/v1",

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "budget_id": "rq1-full-study-v1",
+  "scope": "RQ1 C1 generation, validation, later-checkpoint execution, and blinded adjudication for the locked 36-task cohort.",
+  "generation_budget_config": "config/generation_budget_rq1_c1_cohort_formal.json",
+  "model": {
+    "provider": "openai_codex",
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "decoding": "service_default"
+  },
+  "survivor_hint_triage": {
+    "enabled_for": "mutation_guided_only",
+    "max_representatives_per_task": 16,
+    "max_eligible_hints_per_task": 16,
+    "max_started_calls_per_task": 2,
+    "normal_calls_per_task": 1,
+    "retry_policy": "One technical retry is allowed only when no structured response was captured before the request failed.",
+    "selection_rule": "Group by task, file, function, mutmut operator, and normalized AST edit; select each family's lexicographically smallest mutant ID, stratify by source_file/operator, and rotate deterministically."
+  },
+  "candidate_correctness_review": {
+    "max_started_calls_per_method_task": 1,
+    "max_candidates_per_review": 8,
+    "per_call_output_tokens": 4096,
+    "retry_policy": "No retry after a failed, invalid, or uncertain review response; retain only candidates with verdict correct."
+  },
+  "source_validation": {
+    "repeat_runs": 3,
+    "timeout_seconds": 900,
+    "guided_target_mutant_repeat_runs": 3,
+    "repair_calls": 0
+  },
+  "later_checkpoint_evaluation": {
+    "suite_timeout_seconds": 900,
+    "infrastructure_retries": 1,
+    "targeted_reproduction_runs": 3,
+    "application_failures_are_not_retried": true
+  },
+  "adjudication": {
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "max_started_calls_per_case": 2,
+    "per_call_output_tokens": 2048,
+    "confidence_threshold": 0.8,
+    "method_blind": true
+  }
+}

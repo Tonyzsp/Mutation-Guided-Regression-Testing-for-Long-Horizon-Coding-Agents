@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = ROOT / "data" / "checkpoints" / "checkpoint_packages_rq1_full_36x1"
 RESULT_ROOT = ROOT / "artifacts" / "results" / "rq1_full_36x1"
 COHORT_NAMES = (
+    "vanilla_formal_v5_20261116",
     "vanilla_formal_v4_llm_review_20261114",
     "vanilla_formal_v4_20261019",
     "vanilla_iso_v3_20261019",
@@ -26,8 +27,9 @@ COHORT_NAMES = (
     "vanilla_cohort_gpt6luna_medium_20261018",
 )
 OLD_BASE_AUDIT = RESULT_ROOT / "c1_base_audit_final_20261018" / "c1_base_suite_audit.json"
-FINAL_BASE_AUDIT = RESULT_ROOT / "c1_base_audit_isolation_revalidated_20261019" / "c1_base_suite_audit.json"
-OUTPUT = RESULT_ROOT / "c1_vanilla_cohort_audit_20261019.json"
+FINAL_BASE_AUDIT = RESULT_ROOT / "c1_base_audit_current_sanitized_20261116" / "c1_base_suite_audit.json"
+STUDY_BUDGET = ROOT / "config" / "rq1_full_study_budget_v1.json"
+OUTPUT = RESULT_ROOT / "c1_vanilla_cohort_audit_formal_v1_20261117.json"
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -114,12 +116,20 @@ def audit_task(task: str, final: dict[str, Any]) -> dict[str, Any]:
         "path": "config/generation_budget_rq1_c1_cohort_formal.json",
         "sha256": sha256_file(ROOT / "config" / "generation_budget_rq1_c1_cohort_formal.json"),
     }
+    expected_study_budget = {
+        "path": "config/rq1_full_study_budget_v1.json",
+        "sha256": sha256_file(STUDY_BUDGET),
+    }
     if generation.get("prompt_template_version") != "c1_shared_gap_v4_cohort_v1":
         raise ValueError(f"{task}: selected Vanilla run does not record the shared v4 prompt")
     if inputs.get("prompt_template") != expected_prompt:
         raise ValueError(f"{task}: selected Vanilla run did not use the current v4 prompt template")
     if inputs.get("budget_config") != expected_budget:
         raise ValueError(f"{task}: selected Vanilla run did not use the formal budget configuration")
+    if inputs.get("study_budget_config") != expected_study_budget:
+        raise ValueError(f"{task}: selected Vanilla run did not bind the formal full-study budget")
+    if frozen.get("metadata", {}).get("study_budget_config") != expected_study_budget:
+        raise ValueError(f"{task}: frozen suite does not retain the formal full-study budget binding")
     usage = generation.get("actual_usage", {})
     budget = generation.get("budget", {})
     if int(usage.get("calls", 0)) > 3 or int(usage.get("output_tokens", 0)) > 12_288:
@@ -262,7 +272,7 @@ def main() -> int:
         "retained_count": retained_total,
         "rejected_count": candidate_total - retained_total,
         "empty_generation_task_count": sum(item["candidate_count"] == 0 for item in records),
-        "old_base_audit_sha256": sha256_file(OLD_BASE_AUDIT),
+        "old_base_audit_sha256": sha256_file(OLD_BASE_AUDIT) if OLD_BASE_AUDIT.is_file() else None,
         "final_base_audit_sha256": sha256_file(FINAL_BASE_AUDIT),
         "records": records,
         "errors": errors,

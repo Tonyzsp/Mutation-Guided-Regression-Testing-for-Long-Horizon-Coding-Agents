@@ -1292,6 +1292,7 @@ def main() -> int:
             "generation_run_path": "generation_run.json",
             "generation_assessment": generation_run.get("generation_assessment"),
             "input_manifest_path": "input_manifest.json",
+            "study_budget_config": input_manifest.get("study_budget_config"),
             "prompt_archive_path": "prompt_archive.md",
             "correctness_review_path": str(args.correctness_review.resolve(strict=True).relative_to(generation_dir)),
             "repeat_runs": args.repeats,

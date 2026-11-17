@@ -21,6 +21,7 @@ DEFAULT_PACKAGE_ROOT = REPO_ROOT / "data" / "checkpoints" / "checkpoint_packages
 PROMPT_TEMPLATE = REPO_ROOT / "prompts" / "vanilla_v1.md"
 OUTPUT_SCHEMA = REPO_ROOT / "schemas" / "codex-generated-test-candidates.schema.json"
 BUDGET_CONFIG = REPO_ROOT / "config" / "generation_budget.json"
+STUDY_BUDGET_CONFIG = REPO_ROOT / "config" / "rq1_full_study_budget_v1.json"
 PACKAGE_AUDITOR = REPO_ROOT / "scripts" / "validate_checkpoint_package.py"
 MAX_INPUT_FILE_BYTES = 2_000_000
 
@@ -257,6 +258,12 @@ def main() -> int:
     parser.add_argument("--package", type=Path, required=True, help="Sanitized <task>/C<n> package")
     parser.add_argument("--output-dir", type=Path, required=True, help="New result directory under artifacts/results")
     parser.add_argument("--budget-config", type=Path, default=BUDGET_CONFIG)
+    parser.add_argument(
+        "--study-budget-config",
+        type=Path,
+        default=STUDY_BUDGET_CONFIG,
+        help="Full-study budget record whose hash is bound into the run manifest.",
+    )
     parser.add_argument("--prompt-template", type=Path, default=PROMPT_TEMPLATE)
     parser.add_argument("--opportunity-brief", type=Path)
     parser.add_argument("--output-schema", type=Path)
@@ -288,6 +295,10 @@ def main() -> int:
     if package["task_id"] != package_root.parent.name or package["checkpoint_id"] != package_root.name:
         raise ValueError("package path does not match its task/checkpoint identifiers")
     budget_config = read_json(args.budget_config)
+    study_budget_config = read_json(args.study_budget_config.resolve(strict=True))
+    expected_generation_config = study_budget_config.get("generation_budget_config")
+    if expected_generation_config != args.budget_config.resolve(strict=True).relative_to(REPO_ROOT).as_posix():
+        raise ValueError("study budget does not authorize the selected generation budget configuration")
     configured_schema = budget_config.get("output_schema")
     output_schema_path = args.output_schema or (REPO_ROOT / configured_schema if configured_schema else OUTPUT_SCHEMA)
     budget = budget_config["budget"]
@@ -308,6 +319,9 @@ def main() -> int:
     input_manifest["prompt_template"] = prompt_resource(template_path, "prompt template")
     input_manifest["output_schema"] = prompt_resource(output_schema_path.resolve(strict=True), "output schema")
     input_manifest["budget_config"] = prompt_resource(args.budget_config.resolve(strict=True), "budget configuration")
+    input_manifest["study_budget_config"] = prompt_resource(
+        args.study_budget_config.resolve(strict=True), "full-study budget configuration"
+    )
     input_manifest["budget_id"] = budget_config["budget_id"]
     if args.opportunity_brief:
         input_manifest["opportunity_brief"] = prompt_resource(args.opportunity_brief, "opportunity brief")
@@ -493,6 +507,8 @@ def main() -> int:
         "method": "vanilla_llm",
         "model_config_id": budget_config["model"]["model_config_id"],
         "budget_id": budget_config["budget_id"],
+        "study_budget_id": study_budget_config["budget_id"],
+        "study_budget_config": input_manifest["study_budget_config"],
         "prompt_template_version": budget_config.get("prompt_template_version", "vanilla_v1"),
         "input_manifest_path": "input_manifest.json",
         "prompt_archive_path": "prompt_archive.md",
