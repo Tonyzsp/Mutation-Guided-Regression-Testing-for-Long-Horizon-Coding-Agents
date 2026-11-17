@@ -7,10 +7,13 @@ import hashlib
 import json
 import subprocess
 import sys
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from c1_test_selection import stable_pass_selection
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,9 +23,9 @@ DEFAULT_UNITS = ROOT / "config" / "rq1_full_36x1_candidate_units.json"
 RUNTIME_CONFIG = ROOT / "config" / "checkpoint_runtime.json"
 CLASSIFIER = ROOT / "scripts" / "classify_direct_mutants.py"
 MERGER = ROOT / "scripts" / "merge_direct_mutant_classification.py"
-OUTPUT_LOG = RESULT_ROOT / "c1_direct_mutant_cohort_v3_20261114.jsonl"
-MUTATION_PROTOCOL_VERSION = "rq1-mutmut-v3"
-DIRECT_CLASSIFIER_VERSION = "3"
+OUTPUT_LOG = RESULT_ROOT / "c1_direct_mutant_cohort_v4_20261115.jsonl"
+MUTATION_PROTOCOL_VERSION = "rq1-mutmut-v4"
+DIRECT_CLASSIFIER_VERSION = "4"
 MUTATION_BRIDGES = {
     "mutmut_subprocess_bridge.py": ROOT / "scripts" / "mutmut_subprocess_bridge.py",
     "sitecustomize.py": ROOT / "scripts" / "mutmut_subprocess_sitecustomize.py",
@@ -41,11 +44,119 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def current_bridge_hashes() -> dict[str, str]:
-    return {name: sha256_file(path) for name, path in MUTATION_BRIDGES.items()}
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
-def find_matching_bundle(task: str, baseline: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
+def recompute_complete_direct_summary(
+    runtime_dir: Path,
+    bundle_dir: Path,
+    bundle_summary: dict[str, Any],
+    baseline: dict[str, Any],
+    audit_path: Path,
+    summary: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Upgrade a legacy summary only when the complete direct record set validates."""
+    if (
+        summary.get("format") != "rq1-direct-mutant-classification/v1"
+        or summary.get("task_id") != bundle_summary.get("task_id")
+        or summary.get("checkpoint_id") != "C1"
+        or summary.get("classification_algorithm_version") != DIRECT_CLASSIFIER_VERSION
+        or summary.get("classification_config_sha256") != config.get("classification_config_sha256")
+        or summary.get("baseline_audit_sha256") != sha256_file(audit_path)
+        or config.get("baseline_audit_sha256") != sha256_file(audit_path)
+        or config.get("classification_algorithm_version") != DIRECT_CLASSIFIER_VERSION
+        or config.get("stable_test_ids") != stable_pass_selection(baseline)
+        or summary.get("source_sha256") != bundle_summary.get("source_sha256")
+        or config.get("source_sha256") != bundle_summary.get("source_sha256")
+    ):
+        return None
+
+    expected = config.get("mutants")
+    if not isinstance(expected, list) or not expected:
+        return None
+    expected_statuses: dict[str, str] = {}
+    for mutant in expected:
+        mutant_id = mutant.get("mutant_id")
+        if not isinstance(mutant_id, str) or mutant_id in expected_statuses:
+            return None
+        expected_statuses[mutant_id] = mutant.get("mutmut_status")
+
+    raw_records_path = bundle_dir / bundle_summary.get("records_path", "mutant_records.jsonl")
+    direct_records_path = runtime_dir / "direct_mutant_classification.jsonl"
+    if not raw_records_path.is_file() or not direct_records_path.is_file():
+        return None
+    raw_records = read_jsonl(raw_records_path)
+    raw_by_id = {record.get("mutant_id"): record for record in raw_records}
+    direct_records = read_jsonl(direct_records_path)
+    direct_by_id = {record.get("mutant_id"): record for record in direct_records}
+    if (
+        len(raw_by_id) != len(raw_records)
+        or len(direct_by_id) != len(direct_records)
+        or set(raw_by_id) != set(expected_statuses)
+        or set(direct_by_id) != set(expected_statuses)
+        or summary.get("mutant_count") != len(expected_statuses)
+        or summary.get("classified_count") != len(expected_statuses)
+    ):
+        return None
+
+    stable_ids = config["stable_test_ids"]
+    mutant_test_ids = config.get("mutant_test_ids", {})
+    source_paths = set(config.get("source_paths", []))
+    counts: Counter[str] = Counter()
+    for mutant_id, direct in direct_by_id.items():
+        raw = raw_by_id[mutant_id]
+        raw_status = expected_statuses[mutant_id]
+        status = direct.get("direct_status")
+        matched_tests = mutant_test_ids.get(mutant_id, [])
+        no_test_evidence = not matched_tests and raw_status == "no tests"
+        expected_tests = [] if no_test_evidence else matched_tests or stable_ids
+        expected_method = (
+            "mutmut_no_tests_without_subprocess_hit" if no_test_evidence
+            else "subprocess_function_hits" if matched_tests
+            else "full_stable_suite_fallback"
+        )
+        changed = direct.get("source_changed")
+        if (
+            direct.get("mutmut_status") != raw_status
+            or raw.get("raw_status") != raw_status
+            or status not in {"killed", "survived", "not_tested", "error", "timeout"}
+            or direct.get("selected_test_ids") != expected_tests
+            or direct.get("test_selection_method") != expected_method
+            or not isinstance(changed, dict)
+            or set(changed) != source_paths
+            or (status in {"killed", "survived"} and (not any(changed.values()) or direct.get("apply_exit_code") != 0 or direct.get("error") is not None))
+            or (status in {"error", "timeout"} and not direct.get("error"))
+            or (status == "not_tested" and not no_test_evidence)
+        ):
+            return None
+        counts[status] += 1
+
+    if summary.get("status_counts") != dict(counts):
+        return None
+    repaired = dict(summary)
+    repaired.update(
+        {
+            "complete": True,
+            "all_attempts_resolved": all(status in {"killed", "survived", "not_tested"} for status in (row["direct_status"] for row in direct_records)),
+            "inconclusive_count": sum(counts[status] for status in ("not_tested", "error", "timeout")),
+            "summary_recomputed_at_utc": datetime.now(timezone.utc).isoformat(),
+            "completion_semantics": "all expected mutants have exactly one hash-matched terminal record; error, timeout, and not-tested outcomes remain inconclusive",
+        }
+    )
+    return repaired
+
+
+def find_matching_bundle(
+    task: str,
+    baseline: dict[str, Any],
+    max_children: int,
+) -> tuple[Path, dict[str, Any]]:
     task_root = RESULT_ROOT / task / "C1"
     audit_hash = baseline.get("baseline_audit_sha256")
     matches: list[tuple[Path, dict[str, Any]]] = []
@@ -59,7 +170,7 @@ def find_matching_bundle(task: str, baseline: dict[str, Any]) -> tuple[Path, dic
             or summary.get("task_id") != task
             or summary.get("checkpoint_id") != "C1"
             or summary.get("base_tests_sha256") != baseline.get("base_tests_sha256")
-            or summary.get("mutation_test_selection") != baseline.get("stable_pass_test_ids")
+            or set(summary.get("mutation_test_selection") or []) != set(stable_pass_selection(baseline))
         ):
             continue
         records_path = summary_path.parent / summary.get("records_path", "mutant_records.jsonl")
@@ -74,6 +185,9 @@ def find_matching_bundle(task: str, baseline: dict[str, Any]) -> tuple[Path, dic
                 continue
             runtime_manifest = read_json(run_dir / "runtime_manifest.json")
             mutation_manifest = read_json(run_dir / "mutmut_run_manifest.json")
+            recorded_bridge_hashes = {
+                name: sha256_file(run_dir / name) for name in MUTATION_BRIDGES
+            }
             source_paths = runtime_manifest["task_runtime_profile"]["mutmut"]["source_paths"]
             runtime_sources = {
                 relative: sha256_file(run_dir / Path(*relative.split("/")))
@@ -86,15 +200,16 @@ def find_matching_bundle(task: str, baseline: dict[str, Any]) -> tuple[Path, dic
         if (
             mutation_manifest.get("mutation_protocol_version") != MUTATION_PROTOCOL_VERSION
             or not mutation_manifest.get("mutation_config_sha256")
+            or mutation_manifest.get("mutation_config", {}).get("max_children") != max_children
             or mutation_manifest.get("mutation_config", {}).get("runtime_config_sha256") != sha256_file(RUNTIME_CONFIG)
             or mutation_manifest.get("mutation_config", {}).get("mutmut_version") != "3.8.0"
             or mutation_manifest.get("mutation_config", {}).get("mutant_selection") != []
-            or mutation_manifest.get("bridge_sha256") != current_bridge_hashes()
+            or mutation_manifest.get("bridge_sha256") != recorded_bridge_hashes
         ):
             continue
         if summary.get("source_sha256") != runtime_sources:
             continue
-        if (summary.get("mutation_test_selection") or summary.get("direct_classification_test_selection")) != baseline.get("stable_pass_test_ids"):
+        if set(summary.get("mutation_test_selection") or summary.get("direct_classification_test_selection") or []) != set(stable_pass_selection(baseline)):
             continue
         # Prefer a bundle that already contains direct classification evidence.
         priority = int((summary_path.parent / "direct_mutant_classification_summary.json").is_file())
@@ -112,22 +227,38 @@ def process_task(
     timeout_seconds: int,
     output_suffix: str,
     mutant_workers: int,
+    max_children: int,
 ) -> dict[str, Any]:
-    bundle_dir, bundle = find_matching_bundle(task, baseline)
+    bundle_dir, bundle = find_matching_bundle(task, baseline, max_children)
     runtime_dir = bundle["runtime_dir"]
     direct_summary_path = runtime_dir / "direct_mutant_classification_summary.json"
     direct_results_path = runtime_dir / "direct_mutant_classification.jsonl"
     direct_config_path = runtime_dir / "direct_mutant_classification_config.json"
     reuse_direct = False
+    direct_summary_recomputed = False
     if direct_summary_path.is_file() and direct_results_path.is_file() and direct_config_path.is_file():
         direct_summary = read_json(direct_summary_path)
         direct_config = read_json(direct_config_path)
+        if direct_summary.get("complete") is not True:
+            repaired = recompute_complete_direct_summary(
+                runtime_dir,
+                bundle_dir,
+                bundle["summary"],
+                baseline,
+                audit_path,
+                direct_summary,
+                direct_config,
+            )
+            if repaired is not None:
+                direct_summary_path.write_text(json.dumps(repaired, indent=2) + "\n", encoding="utf-8")
+                direct_summary = repaired
+                direct_summary_recomputed = True
         reuse_direct = (
             direct_summary.get("complete") is True
             and direct_summary.get("classification_algorithm_version") == DIRECT_CLASSIFIER_VERSION
             and direct_summary.get("classification_config_sha256") == direct_config.get("classification_config_sha256")
             and direct_summary.get("source_sha256") == bundle["summary"].get("source_sha256")
-            and direct_config.get("stable_test_ids") == baseline.get("stable_pass_test_ids")
+            and direct_config.get("stable_test_ids") == stable_pass_selection(baseline)
         )
     if not reuse_direct:
         command = [
@@ -142,11 +273,13 @@ def process_task(
             "--workers",
             str(mutant_workers),
         ]
-        if direct_results_path.is_file() and direct_config_path.is_file():
+        if direct_config_path.is_file():
             previous = read_json(direct_config_path)
-            if previous.get("stable_test_ids") != baseline.get("stable_pass_test_ids"):
+            if previous.get("stable_test_ids") != stable_pass_selection(baseline):
                 raise ValueError(f"{task}: partial direct-classification test selection differs from final C1 audit")
             command.append("--resume")
+        elif direct_results_path.is_file():
+            raise ValueError(f"{task}: direct results exist without their config; refusing to overwrite the partial classification")
         result = subprocess.run(
             command,
             cwd=ROOT,
@@ -166,7 +299,7 @@ def process_task(
         raise RuntimeError(f"{task}: direct classification is incomplete")
 
     final_bundle = RESULT_ROOT / task / "C1" / output_suffix
-    if not final_bundle.exists():
+    if not (final_bundle / "mutation_summary.json").is_file():
         command = [
             sys.executable,
             str(MERGER),
@@ -199,6 +332,7 @@ def process_task(
         "status_counts": normalized_summary.get("status_counts"),
         "mutation_score": normalized_summary.get("mutation_score"),
         "direct_classification_reused": reuse_direct,
+        "direct_summary_recomputed": direct_summary_recomputed,
         "baseline_audit_sha256": sha256_file(audit_path),
     }
 
@@ -210,11 +344,16 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=int, default=120)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--mutant-workers", type=int, default=1, help="Isolated concurrent apply-and-test workers per task")
-    parser.add_argument("--output-suffix", default="mutmut_direct_v3_20261114")
+    parser.add_argument("--max-children", type=int, default=4, help="Required Mutmut worker count for the matching raw bundle")
+    parser.add_argument("--output-suffix", default="mutmut_direct_v4_20261115")
+    parser.add_argument("--logs-suffix", default=OUTPUT_LOG.name, help="Cohort JSONL filename under artifacts/results/rq1_full_36x1")
     parser.add_argument("--task", action="append", help="Limit to task IDs; may be repeated")
     args = parser.parse_args()
-    if args.timeout_seconds < 1 or args.workers < 1 or args.mutant_workers < 1:
+    if args.timeout_seconds < 1 or args.workers < 1 or args.mutant_workers < 1 or args.max_children < 1:
         raise ValueError("timeout and worker count must be positive")
+    logs_path = (RESULT_ROOT / args.logs_suffix).resolve()
+    if not logs_path.is_relative_to(RESULT_ROOT.resolve()) or logs_path.suffix.lower() != ".jsonl":
+        raise ValueError("logs suffix must be a JSONL filename under artifacts/results/rq1_full_36x1")
     audit_path = args.baseline_audit.resolve(strict=True)
     audit = read_json(audit_path)
     records = {row["task_id"]: row for row in audit["records"]}
@@ -226,7 +365,7 @@ def main() -> int:
     selected = [unit["task_id"] for unit in units if not args.task or unit["task_id"] in args.task]
     if not selected:
         raise ValueError("no C1 tasks selected")
-    OUTPUT_LOG.parent.mkdir(parents=True, exist_ok=True)
+    logs_path.parent.mkdir(parents=True, exist_ok=True)
     complete = 0
     errors = 0
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
@@ -239,6 +378,7 @@ def main() -> int:
                 args.timeout_seconds,
                 args.output_suffix,
                 args.mutant_workers,
+                args.max_children,
             ): task
             for task in selected
         }
@@ -257,10 +397,10 @@ def main() -> int:
                 }
                 errors += 1
             row["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
-            with OUTPUT_LOG.open("a", encoding="utf-8") as handle:
+            with logs_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
             print(json.dumps(row, ensure_ascii=False), flush=True)
-    print(f"Direct C1 mutmut classification: {complete}/{len(selected)} complete; {errors} failed.", flush=True)
+    print(f"Direct C1 mutmut classification: {complete}/{len(selected)} complete; {errors} failed. Log: {logs_path}", flush=True)
     return 0 if errors == 0 else 1
 
 

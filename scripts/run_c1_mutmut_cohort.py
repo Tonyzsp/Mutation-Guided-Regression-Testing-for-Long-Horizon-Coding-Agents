@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from c1_test_selection import stable_pass_selection
+from export_mutant_records import parse_statuses
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,7 +30,7 @@ MUTATION_BRIDGES = {
     "mutmut_subprocess_bridge.py": ROOT / "scripts" / "mutmut_subprocess_bridge.py",
     "sitecustomize.py": ROOT / "scripts" / "mutmut_subprocess_sitecustomize.py",
 }
-MUTATION_PROTOCOL_VERSION = "rq1-mutmut-v3"
+MUTATION_PROTOCOL_VERSION = "rq1-mutmut-v4"
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -33,8 +38,6 @@ def read_json(path: Path) -> dict[str, Any]:
 
 
 def sha256_file(path: Path) -> str:
-    import hashlib
-
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
@@ -62,6 +65,58 @@ def has_all_mutant_records(path: Path, summary: dict[str, Any]) -> bool:
     except OSError:
         return False
     return count == summary["mutant_count"] and count > 0
+
+
+def raw_run_matches(
+    run_dir: Path,
+    task: str,
+    baseline_record: dict[str, Any],
+    sources: dict[str, str],
+    stable_ids: list[str],
+    max_children: int,
+) -> bool:
+    """Accept a finished run when its saved mutant listing is complete and hash-matched."""
+    try:
+        run_dir = run_dir.resolve(strict=True)
+        allowed_root = (RUNTIME_ROOT / task).resolve(strict=True)
+        if not run_dir.is_relative_to(allowed_root):
+            return False
+        manifest = read_json(run_dir / "mutmut_run_manifest.json")
+        results_path = run_dir / "mutmut-results.txt"
+        if not results_path.is_file() or results_path.stat().st_size == 0:
+            return False
+        results_text = results_path.read_text(encoding="utf-8")
+        statuses = parse_statuses(results_text)
+        result_counts = dict(sorted(Counter(statuses.values()).items()))
+        return (
+            manifest.get("format") == "rq1-checkpoint-mutmut-run/v1"
+            and manifest.get("task_id") == task
+            and manifest.get("checkpoint_id") == "C1"
+            and manifest.get("base_tests_sha256") == baseline_record["base_tests_sha256"]
+            and manifest.get("source_sha256") == sources
+            and manifest.get("mutation_protocol_version") == MUTATION_PROTOCOL_VERSION
+            and bool(manifest.get("mutation_config_sha256"))
+            and manifest.get("mutation_config", {}).get("runtime_config_sha256") == sha256_file(RUNTIME_CONFIG)
+            and manifest.get("mutation_config", {}).get("max_children") == max_children
+            and manifest.get("mutation_config", {}).get("mutmut_version") == "3.8.0"
+            and manifest.get("mutation_config", {}).get("mutant_selection") == []
+            and manifest.get("bridge_sha256") == current_bridge_hashes()
+            and set(manifest.get("mutation_test_selection") or []) == set(stable_ids)
+            # A complete status listing can still be unusable when the stats phase
+            # failed before associating any mutant with a test.
+            and set(result_counts) != {"not checked"}
+            and isinstance(manifest.get("mutmut_exit_code"), int)
+            and manifest.get("results_exit_code") == 0
+            and result_counts == manifest.get("result_counts")
+            and (
+                manifest.get("results_sha256") is None
+                or manifest.get("results_sha256")
+                == hashlib.sha256(results_text.encode("utf-8")).hexdigest()
+            )
+            and bool(statuses)
+        )
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        return False
 
 
 def matching_artifact(task: str, baseline_record: dict[str, Any], sources: dict[str, str], max_children: int) -> Path | None:
@@ -100,10 +155,16 @@ def matching_artifact(task: str, baseline_record: dict[str, Any], sources: dict[
                 and run_manifest.get("mutation_config", {}).get("mutmut_version") == "3.8.0"
                 and run_manifest.get("mutation_config", {}).get("mutant_selection") == []
                 and run_manifest.get("bridge_sha256") == current_bridge_hashes()
+                and set(run_manifest.get("result_counts", {})) != {"not checked"}
                 and (
                     run_manifest.get("mutation_test_selection")
                     or run_manifest.get("direct_classification_test_selection")
-                ) == baseline_record.get("stable_pass_test_ids")
+                ) is not None
+                and set(
+                    run_manifest.get("mutation_test_selection")
+                    or run_manifest.get("direct_classification_test_selection")
+                    or []
+                ) == set(stable_pass_selection(baseline_record))
             ):
                 return summary_path.parent
     return None
@@ -112,30 +173,12 @@ def matching_artifact(task: str, baseline_record: dict[str, Any], sources: dict[
 def matching_raw_run(task: str, baseline_record: dict[str, Any], sources: dict[str, str], stable_ids: list[str], max_children: int) -> Path | None:
     matches: list[Path] = []
     for manifest_path in (RUNTIME_ROOT / task).glob("*-mutmut-*/mutmut_run_manifest.json"):
-        try:
-            manifest = read_json(manifest_path)
-        except (OSError, json.JSONDecodeError):
-            continue
-        if (
-            manifest.get("base_tests_sha256") == baseline_record["base_tests_sha256"]
-            and manifest.get("source_sha256") == sources
-            and manifest.get("mutation_protocol_version") == MUTATION_PROTOCOL_VERSION
-            and bool(manifest.get("mutation_config_sha256"))
-            and manifest.get("mutation_config", {}).get("runtime_config_sha256") == sha256_file(RUNTIME_CONFIG)
-            and manifest.get("mutation_config", {}).get("max_children") == max_children
-            and manifest.get("mutation_config", {}).get("mutmut_version") == "3.8.0"
-            and manifest.get("mutation_config", {}).get("mutant_selection") == []
-            and manifest.get("bridge_sha256") == current_bridge_hashes()
-            and manifest.get("mutation_test_selection") == stable_ids
-            and manifest.get("mutmut_exit_code") == 0
-            and manifest.get("results_exit_code") == 0
-            and (manifest_path.parent / "mutmut-results.txt").is_file()
-        ):
+        if raw_run_matches(manifest_path.parent, task, baseline_record, sources, stable_ids, max_children):
             matches.append(manifest_path.parent)
     return max(matches, key=lambda item: item.stat().st_mtime) if matches else None
 
 
-def export_raw(run_dir: Path, trajectory_id: str) -> None:
+def export_raw(run_dir: Path, trajectory_id: str, diff_chunk_size: int) -> None:
     summary_path = run_dir / "mutation_summary.json"
     if summary_path.is_file():
         existing_summary = read_json(summary_path)
@@ -143,7 +186,17 @@ def export_raw(run_dir: Path, trajectory_id: str) -> None:
         if has_all_mutant_records(existing_records, existing_summary):
             return
     result = subprocess.run(
-        [sys.executable, str(EXPORTER), "--runtime-dir", str(run_dir), "--trajectory-id", trajectory_id, "--allow-incomplete"],
+        [
+            sys.executable,
+            str(EXPORTER),
+            "--runtime-dir",
+            str(run_dir),
+            "--trajectory-id",
+            trajectory_id,
+            "--allow-incomplete",
+            "--diff-chunk-size",
+            str(diff_chunk_size),
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -215,7 +268,7 @@ def materialize_bundle(
         or source_manifest.get("mutation_config", {}).get("max_children") != max_children
         or source_manifest.get("mutation_config", {}).get("mutmut_version") != "3.8.0"
         or source_manifest.get("mutation_config", {}).get("mutant_selection") != []
-        or selected_tests != baseline_record.get("stable_pass_test_ids")
+        or set(selected_tests or []) != set(stable_pass_selection(baseline_record))
     ):
         raise ValueError(f"{task}: mutmut run does not match the current source, base suite, and stable C1 test selection")
     for name in (
@@ -246,9 +299,15 @@ def main() -> int:
     parser.add_argument("--units", type=Path, default=UNIT_MANIFEST)
     parser.add_argument("--max-children", type=int, default=4)
     parser.add_argument("--timeout-seconds", type=int, default=900)
-    parser.add_argument("--run-suffix", default="mutmut_v3_20261114")
-    parser.add_argument("--logs-suffix", default="mutmut_v3_cohort_20261114")
-    parser.add_argument("--direct-output-suffix", default="mutmut_direct_v3_20261114")
+    parser.add_argument(
+        "--diff-chunk-size",
+        type=int,
+        default=32,
+        help="Mutant diffs per short-lived export container (default: 32)",
+    )
+    parser.add_argument("--run-suffix", default="mutmut_v4_20261115")
+    parser.add_argument("--logs-suffix", default="mutmut_v4_cohort_20261115")
+    parser.add_argument("--direct-output-suffix", default="mutmut_direct_v4_20261115")
     parser.add_argument(
         "--task-timeout-seconds",
         type=int,
@@ -259,8 +318,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.task_timeout_seconds is None:
         args.task_timeout_seconds = max(12 * 60 * 60, args.timeout_seconds * 4)
-    if args.max_children < 1 or args.timeout_seconds < 1 or args.task_timeout_seconds < 1:
-        raise ValueError("max children and timeout values must be positive")
+    if args.max_children < 1 or args.timeout_seconds < 1 or args.task_timeout_seconds < 1 or args.diff_chunk_size < 1:
+        raise ValueError("max children, timeout values, and diff chunk size must be positive")
 
     audit_path = args.baseline_audit.resolve(strict=True)
     audit = read_json(audit_path)
@@ -306,7 +365,7 @@ def main() -> int:
                     and direct_summary.get("base_tests_sha256") == baseline.get("base_tests_sha256")
                     and direct_summary.get("source_sha256") == source_hashes(task, baseline)
                     and direct_summary.get("baseline_audit_sha256") == sha256_file(audit_path)
-                    and direct_summary.get("direct_classification_algorithm_version") == "3"
+                    and direct_summary.get("direct_classification_algorithm_version") == "4"
                     and direct_summary.get("direct_classification_config_sha256") == direct_config.get("classification_config_sha256")
                     and direct_manifest.get("mutation_protocol_version") == MUTATION_PROTOCOL_VERSION
                     and direct_manifest.get("mutation_config", {}).get("runtime_config_sha256") == sha256_file(RUNTIME_CONFIG)
@@ -314,7 +373,12 @@ def main() -> int:
                     and (
                         direct_manifest.get("mutation_test_selection")
                         or direct_manifest.get("direct_classification_test_selection")
-                    ) == baseline.get("stable_pass_test_ids")
+                    ) is not None
+                and set(
+                    direct_manifest.get("mutation_test_selection")
+                    or direct_manifest.get("direct_classification_test_selection")
+                    or []
+                ) == set(stable_pass_selection(baseline))
                 )
             except (OSError, KeyError, ValueError, json.JSONDecodeError):
                 direct_ready = False
@@ -363,11 +427,28 @@ def main() -> int:
                 result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=args.task_timeout_seconds)
                 (cohort_root / f"{task}.runner.stdout.log").write_text(result.stdout, encoding="utf-8")
                 (cohort_root / f"{task}.runner.stderr.log").write_text(result.stderr, encoding="utf-8")
-                if result.returncode != 0:
-                    raise RuntimeError(f"mutmut runner exited {result.returncode}: {result.stderr[-4000:]}")
-                manifest_line = next(line for line in result.stdout.splitlines() if line.startswith("Run manifest: "))
-                source_dir = Path(manifest_line.split(": ", 1)[1]).parent.resolve(strict=True)
-            export_raw(source_dir, unit["trajectory_id"])
+                manifest_line = next(
+                    (line for line in result.stdout.splitlines() if line.startswith("Run manifest: ")),
+                    None,
+                )
+                if manifest_line is None:
+                    raise RuntimeError(
+                        f"mutmut runner exited {result.returncode} without a run manifest: {result.stderr[-4000:]}"
+                    )
+                reported_manifest = Path(manifest_line.split(": ", 1)[1]).resolve(strict=True)
+                source_dir = reported_manifest.parent
+                if result.returncode != 0 and not raw_run_matches(
+                    source_dir, task, baseline, sources, baseline["stable_pass_test_ids"], args.max_children
+                ):
+                    raise RuntimeError(
+                        f"mutmut runner exited {result.returncode}; saved mutant results did not pass protocol/hash validation: "
+                        f"{result.stderr[-4000:]}"
+                    )
+                if result.returncode == 0 and not raw_run_matches(
+                    source_dir, task, baseline, sources, baseline["stable_pass_test_ids"], args.max_children
+                ):
+                    raise RuntimeError("mutmut runner completed but its saved results failed protocol/hash validation")
+            export_raw(source_dir, unit["trajectory_id"], args.diff_chunk_size)
             baseline["baseline_audit_sha256"] = sha256_file(audit_path)
             copied = materialize_bundle(source_dir, out, baseline, task, sources, args.max_children)
             status = "complete" if copied.get("complete") is True else "incomplete_mutation_statuses"

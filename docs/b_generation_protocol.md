@@ -41,8 +41,9 @@ Prompt drafts are in [`prompts/`](../prompts/). Both generators use the same str
 2. Run the complete legal base suite under coverage. Preserve the command, raw output, machine-readable coverage report, and source digest.
 3. Run mutmut against the same checkpoint and base suite. Preserve raw tool output and every mutant result; do not silently drop candidates.
 4. For each reported mutant, record its ID, operator, source location, diff, raw tool outcome, normalized status, and supporting logs.
+   Extract diffs in configurable batches (`--diff-chunk-size`, default 32) to bound container memory use. If a batch fails with an out-of-memory error, halve that batch and retry the same mutants down to one at a time. Each completed batch is cached in the runtime directory, so an interrupted export can resume without re-extracting earlier diffs. The selected starting batch size is written to the export summary and does not change mutant selection or classification.
 5. Verify on a representative mutant that the test process imports the mutated source. Record the mutated source path or digest observed by the subprocess. If tests launch the program in a child process, make sure mutmut's stats phase receives trampoline hits from that child and associates them with the pytest test ID; otherwise mutmut may mark every mutant `not checked`. A test that accidentally imports the original checkout invalidates the mutation result.
-6. Preserve every raw mutant record and directly classify each mutant by applying it to staged C1 source and running stable passing C1 test IDs. Mutations that cannot be applied or whose run is incomplete are errors/inconclusive and must not be called survivors. If mutmut reports `no tests` and the subprocess-hit log has no matching target-function hit, record direct status `not_tested` and normalized status `inconclusive`; do not call it a survivor or claim the exact mutated line is unreachable. Other mutants without a function-specific hit use the full stable suite, and their target-function reachability remains unknown. Direct survivors remain `needs_review` because mutmut does not prove semantic non-equivalence. Specification review and the Guided target-kill check prevent unsupported assertions from being retained, while unfiltered hints may consume generation budget.
+6. Preserve every raw mutant record and directly classify each mutant by applying it to staged C1 source and running stable passing C1 test IDs. Mutations that cannot be applied or whose run is incomplete are errors/inconclusive and must not be called survivors. A test-level error on a selected stable test can count as killed only when raw mutmut also reports `killed` and the output has no known resource/harness error marker; retain the errored test IDs and rationale in the direct record. For `execution_server/C1`, the readiness fixture's final `connection refused` text can be stale after an initial request receives a non-200 response; when the only errored selected test is `TestCore.test_initial_stats`, treat it as a kill only if raw mutmut reports `killed` and the traceback contains the fixture's `Server did not start` message. Keep this exception narrow and preserve its rationale. On resume, validate and recover worker shards independently against task/checkpoint, source and baseline hashes, algorithm/protocol version, stable test IDs, and mutant IDs/statuses; one incomplete sibling shard must not discard a valid shard. Archive shard error/timeout attempts and parent-run inconclusive attempts, retry unresolved mutant IDs on resume, and retain the attempt-history JSONL with the normalized bundle. A direct `error` or `timeout` remains an inconclusive outcome in the current bundle; do not count it as killed or survived. Bundle `complete` means every expected mutant has exactly one hash-matched record, while `all_attempts_resolved` separately indicates whether any execution errors/timeouts remain. A finished mutmut run that exits nonzero may still be reused when its hash-matched result listing is nonempty; preserve its raw statuses and send the mutant inventory to direct classification. `not checked` is never a survivor or a complete raw mutation score. If mutmut reports `no tests` and the subprocess-hit log has no matching target-function hit, record direct status `not_tested` and normalized status `inconclusive`; do not call it a survivor or claim the exact mutated line is unreachable. Other mutants without a function-specific hit use the full stable suite, and their target-function reachability remains unknown. Direct survivors remain `needs_review` because mutmut does not prove semantic non-equivalence. Specification review and the Guided target-kill check prevent unsupported assertions from being retained, while unfiltered hints may consume generation budget.
 
 If direct classification yields zero surviving mutants, record a valid zero-call Guided run with zero generated candidates, skip candidate correctness review, and pass the unchanged shared base suite through the normal baseline validator and freezer. This is a completed empty Guided suite, not a generation failure; its generation record must retain the mutation bundle hash and explicitly say why no model call was made. The generation-run schema permits zero eligible mutants and zero CLI attempts for this case.
 
@@ -64,6 +65,13 @@ matching subprocess hit. The merged mutant record maps that state to `inconclusi
 excluded from the survivor pool and the mutation-score denominator, but retained in counts.
 This avoids treating missing test relevance as either a true survivor or proof that the
 exact changed line is unreachable.
+
+Direct outcomes `error` and `timeout` are also preserved in the raw classification record
+and normalized to `inconclusive` in the merged bundle. They are excluded from the survivor
+pool and mutation-score denominator; the bundle audit still requires exactly one status
+record and a hash-matched diff for every mutant. A bundle can therefore be complete as an
+inventory while still reporting inconclusive mutant outcomes; those counts remain explicit
+and are not presented as kills or survivors.
 
 ### Survivor quality triage and hint selection
 
@@ -120,18 +128,29 @@ The checkpoint runner pins `max_stack_depth = 8` and `mutate_only_covered_lines 
 ### Subprocess-aware mutmut runner
 
 For the checkpoint harness, `scripts/run_checkpoint_mutmut.py` runs mutmut in a fresh
-staging directory and installs two small adapters. `sitecustomize.py` records trampoline
-hits made in the benchmark CLI child process, including the active pytest test ID. The
-pytest plugin replays those hits into mutmut's stats collector before its own teardown
-hook runs. This preserves mutmut's normal test selection and kill/survival logic while
-bridging the process boundary.
+staging directory and installs two adapters. `sitecustomize.py` records trampoline hits
+made in benchmark child processes. Each process writes to its own JSONL file under a
+thread lock; the pytest plugin validates and aggregates those records before replaying
+them into mutmut's stats collector. This avoids interleaved writes on Docker Desktop bind
+mounts.
 
-Protocol v3 records a SHA-256 signature over the effective mutmut table, mutmut version,
-runtime configuration, Docker image, requirements, source/test hashes, selected tests,
-asset mounts, bridge hashes, and worker count. Cohort reuse requires the current protocol,
-runtime configuration, bridge, and worker count to match. Direct reclassification also
-records its algorithm version and the raw mutmut-run signature. New runs use `v3` output
-suffixes so older evidence remains available and cannot be mixed into the revised cohort.
+The C1 baseline audit sorts stable test IDs for deterministic reporting, so the runner
+reconstructs their original pytest collection order from the first baseline repetition.
+It also exports that order to the pytest plugin, which restores it when mutmut runs a
+per-mutant test subset (mutmut stores those subsets as unordered sets). For long-lived
+standard-library HTTP servers, the plugin passes the active pytest node ID in an internal
+request header and `sitecustomize.py` uses it to attribute server-process hits to the
+requesting test.
+
+Protocol v4 records a SHA-256 signature over the effective mutmut table, mutmut version,
+runtime configuration, Docker image, requirements, source/test hashes, ordered test
+selection, asset mounts, bridge hashes, and worker count. Cohort reuse requires the current
+protocol, runtime configuration, bridge, and worker count to match. Direct
+reclassification also records its algorithm version and the raw mutmut-run signature.
+The C1 cohort audit requires the protocol worker count (`max_children=4`) by default,
+so older bundles produced with another worker count remain visible but are not counted
+as protocol-complete. New runs use `v4` output suffixes so earlier evidence remains
+available and cannot be mixed into the corrected cohort.
 
 The task's CLI must be imported as a module (`python -c "import hauling; hauling.main()"`)
 so mutmut's trampoline module is the one loaded by the child process. Running

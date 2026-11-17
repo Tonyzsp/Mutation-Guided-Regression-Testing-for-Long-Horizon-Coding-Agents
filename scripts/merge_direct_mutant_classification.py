@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from c1_test_selection import stable_pass_selection
+
 from validate_and_freeze_tests import read_json, sha256_file
 
 
@@ -34,8 +36,12 @@ def main() -> int:
     output = args.output_dir.resolve()
     if not runtime.is_relative_to((ROOT / "tmp").resolve(strict=True)):
         raise ValueError("runtime directory must remain under tmp")
-    if not output.is_relative_to(RESULTS_ROOT.resolve(strict=True)) or output.exists():
-        raise ValueError("output directory must be new and remain under artifacts/results")
+    if not output.is_relative_to(RESULTS_ROOT.resolve(strict=True)):
+        raise ValueError("output directory must remain under artifacts/results")
+    if output.exists() and not output.is_dir():
+        raise ValueError("output path exists and is not a directory")
+    if (output / "mutation_summary.json").is_file():
+        raise ValueError("output directory already contains a completed mutation bundle")
 
     raw_summary_path = runtime / "mutation_summary.json"
     raw_summary = read_json(raw_summary_path)
@@ -50,12 +56,12 @@ def main() -> int:
         raise ValueError("raw mutmut and direct-classification summaries identify different checkpoints")
     if direct_summary.get("complete") is not True:
         raise ValueError("direct classification is incomplete; refusing to normalize the mutant record set")
-    if direct_summary.get("classification_algorithm_version") != "3":
+    if direct_summary.get("classification_algorithm_version") != "4":
         raise ValueError("direct classification uses an obsolete algorithm; rerun it in a fresh mutmut runtime")
     if direct_summary.get("classification_config_sha256") != direct_config.get("classification_config_sha256"):
         raise ValueError("direct classification summary and config signatures do not match")
     if (
-        direct_config.get("mutation_protocol_version") != "rq1-mutmut-v3"
+        direct_config.get("mutation_protocol_version") != "rq1-mutmut-v4"
         or direct_config.get("mutation_run_config_sha256") != mutation_run_manifest.get("mutation_config_sha256")
     ):
         raise ValueError("direct classification was produced from a different or obsolete mutmut run")
@@ -79,7 +85,7 @@ def main() -> int:
         runtime_manifest = read_json(runtime / "runtime_manifest.json")
         if baseline_record.get("base_tests_sha256") != runtime_manifest.get("base_tests_sha256"):
             raise ValueError("final baseline hash differs from the direct-classification runtime")
-        if baseline_record.get("stable_pass_test_ids") != direct_config.get("stable_test_ids"):
+        if stable_pass_selection(baseline_record) != direct_config.get("stable_test_ids"):
             raise ValueError("final stable C1 passing tests differ from the direct-classification test selection")
         baseline_hash = sha256_file(baseline_path)
 
@@ -90,29 +96,46 @@ def main() -> int:
     if len(raw_by_id) != len(raw_records) or len(direct_by_id) != len(direct_records) or set(raw_by_id) != set(direct_by_id):
         raise ValueError("raw and direct mutant IDs do not form the same unique set")
 
-    output.mkdir(parents=True)
+    output.mkdir(parents=True, exist_ok=True)
     records: list[dict[str, Any]] = []
     direct_counts: Counter[str] = Counter()
     reachability_counts: Counter[str] = Counter()
     for raw in raw_records:
         direct = direct_by_id[raw["mutant_id"]]
         status = direct.get("direct_status")
-        if status not in {"killed", "survived", "not_tested"}:
+        if status not in {"killed", "survived", "not_tested", "error", "timeout"}:
             raise ValueError(f"{raw['mutant_id']}: direct status is not terminal: {status!r}")
         merged = dict(raw)
-        merged["normalized_status"] = "inconclusive" if status == "not_tested" else status
+        merged["normalized_status"] = (
+            "inconclusive" if status in {"not_tested", "error", "timeout"} else status
+        )
         reached_function = direct.get("target_function_reached_in_baseline")
         merged["target_function_reached_in_baseline"] = reached_function
         reachability_counts[
             "reached" if reached_function is True else "not_observed" if reached_function is False else "unknown"
         ] += 1
-        merged["review_status"] = "needs_review" if status in {"survived", "not_tested"} else "not_reviewed"
-        merged["review_rationale"] = (
-            "mutmut reported no relevant tests and no matching subprocess hit was recorded; "
-            "the mutant was not directly applied or tested, so it is not counted as a survivor"
-            if status == "not_tested"
-            else None
+        merged["review_status"] = (
+            "needs_review"
+            if status in {"survived", "not_tested", "error", "timeout"}
+            else "not_reviewed"
         )
+        if status == "not_tested":
+            merged["review_rationale"] = (
+                "mutmut reported no relevant tests and no matching subprocess hit was recorded; "
+                "the mutant was not directly applied or tested, so it is not counted as a survivor"
+            )
+        elif status == "error":
+            merged["review_rationale"] = (
+                "direct application or test execution ended with an error; retain the evidence, "
+                "exclude this mutant from the survivor pool and mutation-score denominator"
+            )
+        elif status == "timeout":
+            merged["review_rationale"] = (
+                "direct test execution timed out; retain the evidence, exclude this mutant from "
+                "the survivor pool and mutation-score denominator"
+            )
+        else:
+            merged["review_rationale"] = None
         evidence = merged.get("evidence_path", "")
         merged["evidence_path"] = ";".join(part for part in (evidence, "direct_mutant_classification.jsonl") if part)
         records.append(merged)
@@ -130,6 +153,7 @@ def main() -> int:
         "mutmut_run_manifest.json",
         "direct_mutant_classification.jsonl",
         "direct_mutant_classification.log",
+        "direct_mutant_classification_attempts.jsonl",
         "direct_mutant_classification_config.json",
         "direct_mutant_classification_summary.json",
     ):
@@ -156,11 +180,16 @@ def main() -> int:
         "mutation_test_selection": direct_config["stable_test_ids"],
         "mutant_count": len(records),
         "status_counts": dict(sorted(direct_counts.items())),
+        "test_error_kill_count": direct_summary.get("test_error_kill_count", 0),
         "raw_mutmut_status_counts": raw_summary.get("status_counts", {}),
         "complete": len(records) == raw_summary.get("mutant_count"),
         "mutation_score": direct_counts["killed"] / denominator if denominator else None,
-        "mutation_score_definition": "directly killed / (directly killed + directly survived), using per-mutant mutmut apply followed by stable passing C1 pytest IDs; not-tested and inconclusive mutants are reported separately and excluded",
+        "mutation_score_definition": "directly killed / (directly killed + directly survived), using per-mutant mutmut apply followed by stable passing C1 pytest IDs; not-tested, error, and timeout mutants are reported as inconclusive and excluded",
         "not_tested_count": direct_counts["not_tested"],
+        "direct_error_count": direct_counts["error"],
+        "direct_timeout_count": direct_counts["timeout"],
+        "inconclusive_count": sum(direct_counts[key] for key in ("not_tested", "error", "timeout")),
+        "all_direct_attempts_resolved": direct_summary.get("all_attempts_resolved"),
         "direct_classification_algorithm_version": direct_summary["classification_algorithm_version"],
         "direct_classification_config_sha256": direct_summary["classification_config_sha256"],
         "base_suite_target_function_reachability": dict(sorted(reachability_counts.items())),
@@ -169,6 +198,16 @@ def main() -> int:
         "raw_record_set_sha256": sha256_file(raw_records_path),
         "direct_classification_summary_sha256": sha256_file(direct_summary_path),
         "direct_classification_summary_path": "direct_mutant_classification_summary.json",
+        "direct_classification_attempts_path": (
+            "direct_mutant_classification_attempts.jsonl"
+            if (runtime / "direct_mutant_classification_attempts.jsonl").is_file()
+            else None
+        ),
+        "direct_classification_attempts_sha256": (
+            sha256_file(runtime / "direct_mutant_classification_attempts.jsonl")
+            if (runtime / "direct_mutant_classification_attempts.jsonl").is_file()
+            else None
+        ),
         "baseline_audit_sha256": baseline_hash,
         "direct_classification_baseline_audit_sha256": direct_summary.get("baseline_audit_sha256"),
     }

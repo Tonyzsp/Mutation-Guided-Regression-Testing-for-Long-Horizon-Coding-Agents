@@ -86,15 +86,83 @@ def invoke_mutmut_results(runtime_dir: Path, image: str) -> str:
     return result.stdout + result.stderr
 
 
-def get_diffs(runtime_dir: Path, image: str, mutant_ids: list[str]) -> dict[str, str]:
+def recorded_mutmut_results(runtime_dir: Path) -> str | None:
+    """Reuse a hash-matched results listing already captured by the run wrapper."""
+    manifest_path = runtime_dir / "mutmut_run_manifest.json"
+    results_path = runtime_dir / "mutmut-results.txt"
+    if not manifest_path.is_file() or not results_path.is_file():
+        return None
+    manifest = read_json(manifest_path)
+    if manifest.get("results_exit_code") != 0 or manifest.get("results_file") != results_path.name:
+        return None
+    results_text = results_path.read_text(encoding="utf-8")
+    try:
+        counts = Counter(parse_statuses(results_text).values())
+    except ValueError:
+        return None
+    if dict(sorted(counts.items())) != manifest.get("result_counts"):
+        return None
+    recorded_sha256 = manifest.get("results_sha256")
+    actual_sha256 = hashlib.sha256(results_text.encode("utf-8")).hexdigest()
+    if recorded_sha256 is not None and recorded_sha256 != actual_sha256:
+        return None
+    return results_text
+
+
+def get_diffs(
+    runtime_dir: Path,
+    image: str,
+    mutant_ids: list[str],
+    *,
+    chunk_size: int,
+) -> dict[str, str]:
+    """Extract mutant diffs in resumable batches to bound peak memory use."""
+    if chunk_size < 1:
+        raise ValueError("diff chunk size must be positive")
     ids_path = runtime_dir / "mutmut-export-ids.json"
     ids_path.write_text(json.dumps(mutant_ids), encoding="utf-8")
+    chunk_ids_path = runtime_dir / "mutmut-export-ids-chunk.json"
+    cache_path = runtime_dir / "mutmut-export-diffs-cache.jsonl"
+    ids_sha256 = hashlib.sha256(json.dumps(mutant_ids, ensure_ascii=False).encode("utf-8")).hexdigest()
+    manifest_path = runtime_dir / "mutmut_run_manifest.json"
+    manifest_sha256 = sha256_file(manifest_path) if manifest_path.is_file() else None
+    cache_header = {
+        "cache_format": "rq1-mutmut-diff-cache/v1",
+        "mutant_ids_sha256": ids_sha256,
+        "run_manifest_sha256": manifest_sha256,
+    }
+    all_diffs: dict[str, str] = {}
+    if cache_path.is_file():
+        try:
+            cache_lines = cache_path.read_text(encoding="utf-8").splitlines()
+            cached_header = json.loads(cache_lines[0]) if cache_lines else None
+        except (OSError, json.JSONDecodeError):
+            cache_lines = []
+            cached_header = None
+        if cached_header != cache_header:
+            cache_path.write_text(json.dumps(cache_header, ensure_ascii=False) + "\n", encoding="utf-8")
+        else:
+            expected_ids = set(mutant_ids)
+            for line in cache_lines[1:]:
+                try:
+                    cached = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(cached, dict):
+                    continue
+                mutant_id = cached.get("mutant_id")
+                diff = cached.get("diff")
+                if mutant_id in expected_ids and isinstance(diff, str):
+                    all_diffs[mutant_id] = diff
+    else:
+        cache_path.write_text(json.dumps(cache_header, ensure_ascii=False) + "\n", encoding="utf-8")
+
     export_program = "\n".join(
         [
             "import json",
             "from pathlib import Path",
             "import mutmut.__main__ as mutmut",
-            "names = json.loads(Path('/workspace/mutmut-export-ids.json').read_text(encoding='utf-8'))",
+            "names = json.loads(Path('/workspace/mutmut-export-ids-chunk.json').read_text(encoding='utf-8'))",
             "diffs = {}",
             "for name in names:",
             "    item = mutmut.find_mutant(name)",
@@ -102,32 +170,70 @@ def get_diffs(runtime_dir: Path, image: str, mutant_ids: list[str]) -> dict[str,
             "print(json.dumps(diffs, ensure_ascii=False))",
         ]
     )
-    command = [
-        "docker",
-        "run",
-        "--rm",
-        "--workdir",
-        "/workspace",
-        "--mount",
-        f"type=bind,source={runtime_dir},target=/workspace,readonly",
-        image,
-        PYTHON_BIN,
-        "-c",
-        export_program,
-    ]
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"mutmut diff extraction failed ({result.returncode}):\n{result.stdout}\n{result.stderr}"
+    missing_ids = [mutant_id for mutant_id in mutant_ids if mutant_id not in all_diffs]
+    offset = 0
+    active_chunk_size = chunk_size
+    while offset < len(missing_ids):
+        chunk = missing_ids[offset : offset + active_chunk_size]
+        chunk_ids_path.write_text(json.dumps(chunk), encoding="utf-8")
+        command = [
+            "docker",
+            "run",
+            "--rm",
+            "--workdir",
+            "/workspace",
+            "--mount",
+            f"type=bind,source={runtime_dir},target=/workspace,readonly",
+            image,
+            PYTHON_BIN,
+            "-c",
+            export_program,
+        ]
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
         )
-    return json.loads(result.stdout)
+        if result.returncode != 0:
+            error_output = result.stdout + "\n" + result.stderr
+            lowered_error = error_output.lower()
+            memory_exhaustion = any(
+                marker in lowered_error
+                for marker in ("cannot allocate memory", "errno 12", "out of memory")
+            )
+            if memory_exhaustion and len(chunk) > 1:
+                previous_chunk_size = active_chunk_size
+                active_chunk_size = max(1, len(chunk) // 2)
+                print(
+                    "Mutmut diff extraction ran out of memory for "
+                    f"mutants {offset + 1}-{offset + len(chunk)}; retrying the same batch "
+                    f"with {active_chunk_size} mutant(s) (previous batch size {previous_chunk_size}).",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+            raise RuntimeError(
+                "mutmut diff extraction failed "
+                f"for pending mutants {offset + 1}-{offset + len(chunk)} "
+                f"({result.returncode}):\n{result.stdout}\n{result.stderr}"
+            )
+        chunk_diffs = json.loads(result.stdout)
+        if set(chunk_diffs) != set(chunk):
+            raise ValueError(
+                f"mutmut diff extraction returned a mismatched ID set for mutants "
+                f"{offset + 1}-{offset + len(chunk)}"
+            )
+        with cache_path.open("a", encoding="utf-8", newline="\n") as cache:
+            for mutant_id, diff in chunk_diffs.items():
+                cache.write(json.dumps({"mutant_id": mutant_id, "diff": diff}, ensure_ascii=False) + "\n")
+        all_diffs.update(chunk_diffs)
+        offset += len(chunk)
+    if set(all_diffs) != set(mutant_ids):
+        raise ValueError("mutmut diff extraction did not return every mutant ID")
+    return all_diffs
 
 
 def source_location(diff: str, fallback_line: int) -> int:
@@ -179,7 +285,10 @@ def main() -> int:
     parser.add_argument("--runtime-dir", type=Path, required=True)
     parser.add_argument("--trajectory-id", required=True)
     parser.add_argument("--allow-incomplete", action="store_true")
+    parser.add_argument("--diff-chunk-size", type=int, default=32)
     args = parser.parse_args()
+    if args.diff_chunk_size < 1:
+        raise ValueError("--diff-chunk-size must be positive")
 
     runtime_dir = args.runtime_dir.resolve(strict=True)
     tmp_root = (REPO_ROOT / "tmp").resolve(strict=True)
@@ -195,8 +304,10 @@ def main() -> int:
     if profile is None or "mutmut" not in profile:
         raise ValueError(f"runtime manifest has no mutmut profile for {runtime_manifest['task_id']!r}")
     image = str(runtime_manifest["docker_image"])
-    results_text = invoke_mutmut_results(runtime_dir, image)
-    (runtime_dir / "mutmut-results.txt").write_text(results_text, encoding="utf-8")
+    results_text = recorded_mutmut_results(runtime_dir)
+    if results_text is None:
+        results_text = invoke_mutmut_results(runtime_dir, image)
+        (runtime_dir / "mutmut-results.txt").write_text(results_text, encoding="utf-8")
     statuses = parse_statuses(results_text)
     counts = Counter(statuses.values())
     incomplete = any(status not in {"killed", "survived"} for status in statuses.values())
@@ -213,6 +324,7 @@ def main() -> int:
             for relative in profile["mutmut"]["source_paths"]
         },
         "mutant_count": len(statuses),
+        "diff_extraction_chunk_size": args.diff_chunk_size,
         "status_counts": dict(sorted(counts.items())),
         "complete": not incomplete,
         "mutation_score": None,
@@ -233,7 +345,7 @@ def main() -> int:
     source_path = str(profile["mutmut"]["source_paths"][0])
     source_text = (runtime_dir / safe_relative(source_path)).read_text(encoding="utf-8")
     ids_to_diff = list(statuses)
-    diffs = get_diffs(runtime_dir, image, ids_to_diff)
+    diffs = get_diffs(runtime_dir, image, ids_to_diff, chunk_size=args.diff_chunk_size)
 
     records_path = runtime_dir / "mutant_records.jsonl"
     with records_path.open("w", encoding="utf-8", newline="\n") as output:

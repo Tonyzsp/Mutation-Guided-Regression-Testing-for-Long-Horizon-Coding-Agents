@@ -1,6 +1,6 @@
 {
   "format": "rq1-candidate-unit-manifest/v1",
-  "created_at_utc": "2026-10-19T09:32:36.181861+00:00",
+  "created_at_utc": "2026-11-15T12:42:02.372465+00:00",
   "dataset": "rq1_full_36x1",
   "selection_rule": "Use C1 as the single source checkpoint for each trajectory; list every later checkpoint as a potential target. Generation inputs are restricted to that C1 package. This prepares the full 36-trajectory long-horizon comparison without opening future checkpoint contents.",
   "package_root": "C:\\Users\\31624\\OneDrive\\Desktop\\Mutation\\Mutation-Guided-Regression-Testing-for-Long-Horizon-Coding-Agents\\data\\checkpoints\\checkpoint_packages_rq1_full_36x1",
@@ -265,9 +265,9 @@
       "trajectory_id": "rq1_full_36x1/execution_server",
       "source_checkpoint": "C1",
       "source_package": "execution_server/C1",
-      "source_package_json_sha256": "a1dc23f6fc3b77b8662a66c99e83b29b03033b623926bdc52b20acb99f1254f3",
+      "source_package_json_sha256": "1e95e2ed290a240c2e95bf7cd93bc87f0bf145a3a6eb95763103cfb85c1ec191",
       "workspace_revision": "c11ffb6fb5075af3f4ac41289870c996262b75a6962968119ca046c9701a8cea",
-      "base_tests_sha256": "15a7b7a9d9ed5ead80d5856a98612bb0c7d33d985f016377de0713a1439aabfd",
+      "base_tests_sha256": "5921a1abe5c6045b864eb057dbd54b0f2973dbed248e2fb493786e89507f65a2",
       "target_checkpoints": [
         "C2",
         "C3",

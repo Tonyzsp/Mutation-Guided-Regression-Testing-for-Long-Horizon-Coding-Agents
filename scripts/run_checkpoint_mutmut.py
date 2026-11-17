@@ -15,13 +15,15 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from c1_test_selection import stable_pass_selection
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_CONFIG = REPO_ROOT / "config" / "checkpoint_runtime.json"
 CONTAINER_WORKSPACE = "/workspace"
 MUTMUT_BIN = "/opt/mutmut-env/bin/mutmut"
 MUTMUT_HITS_PATH = f"{CONTAINER_WORKSPACE}/mutmut-subprocess-hits.jsonl"
-MUTATION_PROTOCOL_VERSION = "rq1-mutmut-v3"
+MUTATION_PROTOCOL_VERSION = "rq1-mutmut-v4"
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -236,6 +238,9 @@ def write_run_results(
         "mutmut_exit_code": run_result.returncode,
         "results_exit_code": results_exit_code,
         "result_counts": status_counts,
+        "results_sha256": hashlib.sha256(results_text.encode("utf-8")).hexdigest()
+        if results_result is not None
+        else None,
         "run_log": run_log.name,
         "results_file": "mutmut-results.txt" if results_result is not None else None,
         "subprocess_hits_file": "mutmut-subprocess-hits.jsonl",
@@ -268,6 +273,10 @@ def main() -> int:
     parser.add_argument("--max-children", type=int, default=4)
     parser.add_argument("--mutant", action="append", default=[], help="Run only this mutant; repeatable")
     parser.add_argument("--debug", action="store_true", help="Include mutmut's verbose pytest output")
+    parser.add_argument(
+        "--entrypoint-template-override",
+        help="Task-specific CLI entrypoint template, recorded in the isolated runtime manifest",
+    )
     parser.add_argument(
         "--baseline-audit",
         type=Path,
@@ -333,9 +342,26 @@ def main() -> int:
     if task_profile is None or "mutmut" not in task_profile:
         raise ValueError(f"no mutmut runtime profile for {runtime_manifest['task_id']!r}")
     mutmut_profile = task_profile["mutmut"]
+    if args.entrypoint_template_override is not None:
+        template = args.entrypoint_template_override
+        if template.count("{entry_file}") != 1 or "\n" in template or "\r" in template:
+            raise ValueError("entrypoint template override must contain one {entry_file} placeholder and no newlines")
+        task_profile = {**task_profile, "mutmut": {**mutmut_profile, "entrypoint_template": template}}
+        runtime_manifest["task_runtime_profile"] = task_profile
+        runtime_manifest["mutmut_entrypoint_template_override"] = template
+        mutmut_profile = task_profile["mutmut"]
+        (runtime_dir / "runtime_manifest.json").write_text(
+            json.dumps(runtime_manifest, indent=2) + "\n", encoding="utf-8"
+        )
 
     baseline_audit_path: str | None = None
     test_selection: list[str] | None = runtime_manifest.get("mutmut_test_selection")
+    if (
+        args.baseline_audit is None
+        and args.resume_mutmut_dir is not None
+        and runtime_manifest.get("baseline_audit_path")
+    ):
+        args.baseline_audit = Path(runtime_manifest["baseline_audit_path"])
     if args.baseline_audit is not None:
         audit_path = args.baseline_audit.resolve(strict=True)
         allowed_results = (REPO_ROOT / "artifacts" / "results").resolve(strict=True)
@@ -353,17 +379,30 @@ def main() -> int:
         baseline = matching[0]
         if baseline.get("status") not in {"stable_pass", "stable_with_failures"} or baseline.get("unstable_test_ids"):
             raise ValueError(f"baseline audit is not stable enough for mutation analysis: {baseline.get('status')}")
-        selected = baseline.get("stable_pass_test_ids")
+        selected = stable_pass_selection(baseline)
         if not isinstance(selected, list) or not selected:
             raise ValueError("baseline audit has no consistently passing test IDs to use for mutation analysis")
         test_selection = [str(item) for item in selected]
         baseline_audit_path = str(audit_path)
+    if args.resume_mutmut_dir is not None and test_selection is None:
+        raise ValueError(
+            "resuming a mutmut workspace requires --baseline-audit or a persisted mutmut_test_selection"
+        )
     if test_selection is not None and (
         not isinstance(test_selection, list)
         or not test_selection
         or any(not isinstance(item, str) or not item.strip() for item in test_selection)
     ):
         raise ValueError("mutmut_test_selection must be a non-empty list of test node IDs")
+
+    if test_selection is not None:
+        runtime_manifest["mutmut_test_selection"] = test_selection
+    if baseline_audit_path is not None:
+        runtime_manifest["baseline_audit_path"] = baseline_audit_path
+        runtime_manifest["baseline_audit_sha256"] = sha256_file(Path(baseline_audit_path))
+    (runtime_dir / "runtime_manifest.json").write_text(
+        json.dumps(runtime_manifest, indent=2) + "\n", encoding="utf-8"
+    )
 
     container_workspace = runtime_config["container_workspace"].rstrip("/")
     if container_workspace != CONTAINER_WORKSPACE:
@@ -455,6 +494,14 @@ def main() -> int:
             raise ValueError(f"asset mount target is outside container workspace: {target!r}")
         command.extend(
             ["--mount", f"type=bind,source={source},target={target},readonly"]
+        )
+    if test_selection:
+        command.extend(
+            [
+                "--env",
+                "RQ1_MUTMUT_TEST_ORDER_JSON="
+                + json.dumps(test_selection, ensure_ascii=False, separators=(",", ":")),
+            ]
         )
 
     run_mutmut_command = [MUTMUT_BIN, "run", "--max-children", str(args.max_children), *args.mutant]

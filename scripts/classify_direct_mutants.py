@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import shlex
 import shutil
 import subprocess
@@ -21,6 +22,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from c1_test_selection import stable_pass_selection
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -36,8 +39,10 @@ from scripts.validate_and_freeze_tests import (
 
 PYTHON_BIN = "/opt/mutmut-env/bin/python"
 MUTMUT_BIN = "/opt/mutmut-env/bin/mutmut"
-DIRECT_CLASSIFIER_VERSION = "3"
-MUTATION_PROTOCOL_VERSION = "rq1-mutmut-v3"
+DIRECT_CLASSIFIER_VERSION = "4"
+MUTATION_PROTOCOL_VERSION = "rq1-mutmut-v4"
+TERMINAL_DIRECT_STATUSES = {"killed", "survived", "not_tested"}
+FINAL_DIRECT_STATUSES = TERMINAL_DIRECT_STATUSES | {"error", "timeout"}
 MUTATION_BRIDGES = {
     "mutmut_subprocess_bridge.py": REPO_ROOT / "scripts" / "mutmut_subprocess_bridge.py",
     "sitecustomize.py": REPO_ROOT / "scripts" / "mutmut_subprocess_sitecustomize.py",
@@ -66,9 +71,388 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def run_with_process_group(command: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+    """Run a command and kill its whole child process group on timeout.
+
+    Benchmark tests can start CLI subprocesses that inherit pytest's output
+    pipes. Killing only pytest may leave those children alive and keep
+    ``communicate()`` blocked, so execute pytest in its own POSIX session.
+    """
+    if os.name == "nt":
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = process.communicate()
+        raise subprocess.TimeoutExpired(
+            command,
+            timeout,
+            output=stdout,
+            stderr=stderr,
+        ) from error
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
 def json_sha256(value: dict[str, Any]) -> str:
     encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def worker_config_hash_matches(worker_config: dict[str, Any]) -> bool:
+    """Accept canonical shard hashes and the legacy parent-hash encoding."""
+    recorded_hash = worker_config.get("classification_config_sha256")
+    canonical_signature = {
+        key: value
+        for key, value in worker_config.items()
+        if key not in {"resume", "classification_config_sha256"}
+    }
+    valid_hashes = {json_sha256(canonical_signature)}
+    parent_hash = worker_config.get("parent_classification_config_sha256")
+    if isinstance(parent_hash, str):
+        legacy_signature = {
+            key: value for key, value in worker_config.items() if key != "resume"
+        }
+        legacy_signature["classification_config_sha256"] = parent_hash
+        valid_hashes.add(json_sha256(legacy_signature))
+    return isinstance(recorded_hash, str) and recorded_hash in valid_hashes
+
+
+def retry_inconclusive_records(runtime_dir: Path, results_path: Path) -> int:
+    """Keep failed attempts auditable while making only conclusive rows resumable."""
+    if not path_is_file(results_path):
+        return 0
+    records = [
+        json.loads(line)
+        for line in read_text(results_path).splitlines()
+        if line.strip()
+    ]
+    ids = [record.get("mutant_id") for record in records]
+    if len(ids) != len(set(ids)):
+        raise ValueError("direct-classification results contain duplicate mutant IDs")
+    conclusive = [
+        record for record in records
+        if record.get("direct_status") in TERMINAL_DIRECT_STATUSES
+    ]
+    inconclusive = [
+        record for record in records
+        if record.get("direct_status") not in TERMINAL_DIRECT_STATUSES
+    ]
+    if not inconclusive:
+        return 0
+
+    attempts_path = runtime_dir / "direct_mutant_classification_attempts.jsonl"
+    attempt_counts: dict[str, int] = {}
+    if path_is_file(attempts_path):
+        for line in read_text(attempts_path).splitlines():
+            if not line.strip():
+                continue
+            prior = json.loads(line)
+            mutant_id = prior.get("mutant_id")
+            if isinstance(mutant_id, str):
+                attempt_counts[mutant_id] = max(attempt_counts.get(mutant_id, 0), int(prior.get("attempt_number", 0)))
+
+    with open(filesystem_path(attempts_path), "a", encoding="utf-8") as handle:
+        for record in inconclusive:
+            mutant_id = str(record.get("mutant_id", ""))
+            attempt_number = attempt_counts.get(mutant_id, 0) + 1
+            attempt_counts[mutant_id] = attempt_number
+            handle.write(json.dumps({
+                "format": "rq1-direct-mutant-attempt/v1",
+                "archived_at_utc": datetime.now(timezone.utc).isoformat(),
+                "attempt_number": attempt_number,
+                **record,
+            }, ensure_ascii=False, separators=(",", ":")) + "\n")
+    write_text_file(
+        results_path,
+        "".join(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n" for record in conclusive),
+    )
+    return len(inconclusive)
+
+
+def recover_parallel_worker_results(
+    runtime_dir: Path,
+    config: dict[str, Any],
+    results_path: Path,
+) -> int:
+    """Recover conclusive rows from each valid shard, even if another shard failed."""
+    expected = {item["mutant_id"]: item["mutmut_status"] for item in config["mutants"]}
+    existing = [
+        json.loads(line)
+        for line in read_text(results_path).splitlines()
+        if line.strip()
+    ] if path_is_file(results_path) else []
+    terminal_ids = {
+        record["mutant_id"]
+        for record in existing
+        if record.get("direct_status") in TERMINAL_DIRECT_STATUSES
+    }
+    pending_ids = set(expected) - terminal_ids
+    if not pending_ids:
+        return 0
+
+    candidate_roots = sorted(
+        runtime_dir.parent.glob(f"{runtime_dir.name}-direct-workers-*"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    print(
+        f"Direct shard recovery scan: pending={len(pending_ids)} roots={len(candidate_roots)}",
+        flush=True,
+    )
+    for candidate_root in candidate_roots:
+        worker_dirs = sorted(candidate_root.glob("worker-*"))
+        if not worker_dirs:
+            continue
+        candidate_records: dict[str, dict[str, Any]] = {}
+        worker_attempt_records: list[tuple[str, str, dict[str, Any]]] = []
+        claimed_ids: set[str] = set()
+        conflicting_shards = False
+        for worker_dir in worker_dirs:
+            try:
+                worker_config_path = worker_dir / "direct_mutant_classification_config.json"
+                worker_config = read_json(worker_config_path) if path_is_file(worker_config_path) else None
+                worker_index = worker_dir.name.rsplit("-", 1)[-1]
+                worker_results_name = (
+                    str(worker_config["results_path"])
+                    if worker_config is not None
+                    else f"direct-worker-{worker_index}.jsonl"
+                )
+                worker_summary_name = (
+                    str(worker_config["summary_path"])
+                    if worker_config is not None
+                    else f"direct-worker-{worker_index}-summary.json"
+                )
+                worker_results_path = worker_dir / worker_results_name
+                worker_summary = read_json(worker_dir / worker_summary_name)
+                rows = [
+                    json.loads(line)
+                    for line in read_text(worker_results_path).splitlines()
+                    if line.strip()
+                ]
+            except (OSError, KeyError, ValueError, json.JSONDecodeError):
+                # A damaged or absent shard must not invalidate its siblings.
+                print(f"Direct shard recovery skipped unreadable shard: {worker_dir}", flush=True)
+                continue
+
+            if worker_config is not None:
+                assigned = {
+                    item["mutant_id"]: item["mutmut_status"]
+                    for item in worker_config.get("mutants", [])
+                }
+                worker_signature = {
+                    key: value
+                    for key, value in worker_config.items()
+                    if key not in {"resume", "classification_config_sha256"}
+                }
+                config_mismatches = [
+                    key for key in (
+                        "task_id", "checkpoint_id", "classification_algorithm_version",
+                        "mutation_protocol_version", "source_paths", "source_sha256",
+                        "stable_test_ids", "mutant_test_ids", "baseline_audit_sha256",
+                    )
+                    if worker_config.get(key) != config.get(key)
+                ]
+                if not worker_config_hash_matches(worker_config):
+                    config_mismatches.append("classification_config_sha256")
+                if worker_summary.get("classification_config_sha256") != worker_config.get("classification_config_sha256"):
+                    config_mismatches.append("summary_classification_config_sha256")
+                config_matches = not config_mismatches
+            else:
+                # Earlier worker shards stored their partition results and summary
+                # but did not copy the worker config into the shard directory.
+                # Reconstruct the assigned IDs from the rows, then validate every
+                # row against the current parent config below.
+                assigned = {
+                    record.get("mutant_id"): record.get("mutmut_status")
+                    for record in rows
+                    if isinstance(record.get("mutant_id"), str)
+                }
+                config_matches = (
+                    worker_summary.get("format") == "rq1-direct-mutant-classification/v1"
+                    and worker_summary.get("classification_algorithm_version")
+                    == config.get("classification_algorithm_version")
+                )
+                config_mismatches = [] if config_matches else ["legacy_summary_format_or_algorithm"]
+            row_ids = [record.get("mutant_id") for record in rows]
+            observed_counts: dict[str, int] = {}
+            for record in rows:
+                status = record.get("direct_status")
+                observed_counts[status] = observed_counts.get(status, 0) + 1
+            if (
+                not config_matches
+                or not assigned
+                or any(mutant_id not in expected or expected[mutant_id] != status for mutant_id, status in assigned.items())
+                or len(row_ids) != len(set(row_ids))
+                or set(row_ids) != set(assigned)
+                or claimed_ids & set(assigned)
+                or worker_summary.get("classified_count") != len(rows)
+                or worker_summary.get("mutant_count") != len(assigned)
+                or worker_summary.get("task_id") != config.get("task_id")
+                or worker_summary.get("checkpoint_id") != config.get("checkpoint_id")
+                or worker_summary.get("baseline_audit_sha256") != config.get("baseline_audit_sha256")
+                or worker_summary.get("source_sha256") != config.get("source_sha256")
+                or worker_summary.get("status_counts") != observed_counts
+                or worker_summary.get("complete") not in {
+                    all(record.get("direct_status") in TERMINAL_DIRECT_STATUSES for record in rows),
+                    all(record.get("direct_status") in FINAL_DIRECT_STATUSES for record in rows),
+                }
+            ):
+                conflicting_shards = conflicting_shards or bool(claimed_ids & set(assigned))
+                print(
+                    f"Direct shard recovery skipped metadata-invalid shard: {worker_dir.name} "
+                    f"config_present={worker_config is not None} config={config_matches} "
+                    f"mismatches={config_mismatches} rows={len(rows)} assigned={len(assigned)} "
+                    f"summary_counts_match={worker_summary.get('status_counts') == observed_counts}",
+                    flush=True,
+                )
+                continue
+
+            for source_name, expected_hash in config["source_sha256"].items():
+                source_path = worker_dir / Path(*source_name.split("/"))
+                if not path_is_file(source_path) or sha256_file(source_path) != expected_hash:
+                    config_matches = False
+                    break
+            if not config_matches:
+                print(f"Direct shard recovery skipped config/source mismatch: {worker_dir}", flush=True)
+                continue
+
+            shard_valid = True
+            shard_records: dict[str, dict[str, Any]] = {}
+            for record in rows:
+                mutant_id = record["mutant_id"]
+                matched_tests = config["mutant_test_ids"].get(mutant_id, [])
+                no_test_evidence = not matched_tests and expected[mutant_id] == "no tests"
+                selected_test_ids = [] if no_test_evidence else matched_tests or config["stable_test_ids"]
+                selection_method = (
+                    "mutmut_no_tests_without_subprocess_hit" if no_test_evidence
+                    else "subprocess_function_hits" if matched_tests
+                    else "full_stable_suite_fallback"
+                )
+                source_changed = record.get("source_changed")
+                status = record.get("direct_status")
+                if (
+                    record.get("mutmut_status") != expected[mutant_id]
+                    or record.get("selected_test_ids") != selected_test_ids
+                    or record.get("test_selection_method") != selection_method
+                    or status not in TERMINAL_DIRECT_STATUSES | {"error", "timeout"}
+                    or not isinstance(source_changed, dict)
+                    or set(source_changed) != set(config["source_paths"])
+                    or (status in TERMINAL_DIRECT_STATUSES and record.get("error") is not None)
+                    or (status in {"killed", "survived"} and (not all(source_changed.values()) or record.get("apply_exit_code") != 0))
+                    or (no_test_evidence and status != "not_tested")
+                    or (status == "not_tested" and not no_test_evidence)
+                ):
+                    shard_valid = False
+                    break
+                if status in TERMINAL_DIRECT_STATUSES:
+                    shard_records[mutant_id] = record
+                else:
+                    worker_attempt_records.append((candidate_root.name, worker_dir.name, record))
+            if not shard_valid:
+                print(f"Direct shard recovery skipped invalid rows: {worker_dir}", flush=True)
+                continue
+            claimed_ids.update(assigned)
+            candidate_records.update(shard_records)
+            print(
+                f"Direct shard recovery accepted {worker_dir.name}: "
+                f"rows={len(rows)} terminal={len(shard_records)}",
+                flush=True,
+            )
+
+        if conflicting_shards:
+            continue
+        if worker_attempt_records:
+            attempts_path = runtime_dir / "direct_mutant_classification_attempts.jsonl"
+            previous_attempts = (
+                [
+                    json.loads(line)
+                    for line in read_text(attempts_path).splitlines()
+                    if line.strip()
+                ]
+                if path_is_file(attempts_path)
+                else []
+            )
+            attempt_counts: dict[str, int] = {}
+            archived_shard_keys: set[tuple[str, str, str, str]] = set()
+            for attempt in previous_attempts:
+                mutant_id = attempt.get("mutant_id")
+                if isinstance(mutant_id, str):
+                    attempt_counts[mutant_id] = max(
+                        attempt_counts.get(mutant_id, 0),
+                        int(attempt.get("attempt_number", 0)),
+                    )
+                origin = attempt.get("recovered_from_worker_shard")
+                if isinstance(origin, str):
+                    archived_shard_keys.add((
+                        origin,
+                        str(mutant_id),
+                        str(attempt.get("direct_status")),
+                        str(attempt.get("error")),
+                    ))
+            with open(filesystem_path(attempts_path), "a", encoding="utf-8") as handle:
+                for worker_run, worker_name, record in worker_attempt_records:
+                    mutant_id = str(record.get("mutant_id", ""))
+                    origin = f"{worker_run}/{worker_name}"
+                    key = (
+                        origin,
+                        mutant_id,
+                        str(record.get("direct_status")),
+                        str(record.get("error")),
+                    )
+                    if key in archived_shard_keys:
+                        continue
+                    attempt_counts[mutant_id] = attempt_counts.get(mutant_id, 0) + 1
+                    handle.write(json.dumps({
+                        **record,
+                        "format": "rq1-direct-mutant-attempt/v1",
+                        "archived_at_utc": datetime.now(timezone.utc).isoformat(),
+                        "attempt_number": attempt_counts[mutant_id],
+                        "recovered_from_worker_shard": origin,
+                    }, ensure_ascii=False, separators=(",", ":")) + "\n")
+        recoverable = {
+            mutant_id: record
+            for mutant_id, record in candidate_records.items()
+            if mutant_id in pending_ids
+        }
+        if recoverable:
+            print(
+                f"Direct shard recovery recovered {len(recoverable)} pending results",
+                flush=True,
+            )
+            existing_by_id = {record["mutant_id"]: record for record in existing}
+            existing_by_id.update(recoverable)
+            write_text_file(
+                results_path,
+                "".join(
+                    json.dumps(existing_by_id[mutant["mutant_id"]], ensure_ascii=False, separators=(",", ":")) + "\n"
+                    for mutant in config["mutants"]
+                    if mutant["mutant_id"] in existing_by_id
+                ),
+            )
+            return len(recoverable)
+    return 0
 
 
 def run_parallel_classification(
@@ -162,12 +546,24 @@ def run_parallel_classification(
                     record.get("mutmut_status") != raw_status_by_id.get(mutant_id)
                     or record.get("selected_test_ids") != expected_tests
                     or record.get("test_selection_method") != expected_method
-                    or record.get("direct_status") not in {"killed", "survived", "not_tested"}
-                    or record.get("error") is not None
-                    or (not no_test_evidence and record.get("apply_exit_code") != 0)
+                    or record.get("direct_status") not in FINAL_DIRECT_STATUSES
+                    or (
+                        record.get("direct_status") in TERMINAL_DIRECT_STATUSES
+                        and record.get("error") is not None
+                    )
+                    or (
+                        record.get("direct_status") in {"error", "timeout"}
+                        and not record.get("error")
+                    )
                     or not isinstance(source_changed, dict)
                     or set(source_changed) != set(config["source_paths"])
-                    or (not no_test_evidence and not all(source_changed.values()))
+                    or (
+                        record.get("direct_status") in {"killed", "survived"}
+                        and (
+                            not all(source_changed.values())
+                            or record.get("apply_exit_code") != 0
+                        )
+                    )
                 ):
                     rows_valid = False
                     break
@@ -175,7 +571,10 @@ def run_parallel_classification(
                 len(worker_rows) != len(assigned_ids)
                 or row_ids != assigned_ids
                 or not rows_valid
-                or worker_summary.get("complete") is not True
+                or worker_summary.get("complete") not in {
+                    all(record.get("direct_status") in TERMINAL_DIRECT_STATUSES for record in worker_rows),
+                    all(record.get("direct_status") in FINAL_DIRECT_STATUSES for record in worker_rows),
+                }
                 or worker_summary.get("classified_count") != len(assigned_ids)
                 or worker_summary.get("source_sha256") != config["source_sha256"]
                 or worker_summary.get("task_id") != config["task_id"]
@@ -246,7 +645,11 @@ def run_parallel_classification(
         worker_config["progress_path"] = f"direct-worker-{index:02d}.log"
         worker_config["summary_path"] = f"direct-worker-{index:02d}-summary.json"
         worker_config["parent_classification_config_sha256"] = config["classification_config_sha256"]
-        worker_signature = {key: value for key, value in worker_config.items() if key != "resume"}
+        worker_signature = {
+            key: value
+            for key, value in worker_config.items()
+            if key not in {"resume", "classification_config_sha256"}
+        }
         worker_config["classification_config_sha256"] = json_sha256(worker_signature)
         worker_config_path = worker_dir / "direct_mutant_classification_config.json"
         worker_script_path = worker_dir / "direct_mutant_classification_worker.py"
@@ -341,12 +744,50 @@ WORKER = r'''from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+def run_with_process_group(command, timeout):
+    if os.name == "nt":
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = process.communicate()
+        raise subprocess.TimeoutExpired(
+            command,
+            timeout,
+            output=stdout,
+            stderr=stderr,
+        ) from error
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 root = Path.cwd()
@@ -409,6 +850,7 @@ try:
         apply_stderr = ""
         apply_exit_code = None
         changed = {name: False for name in sources}
+        error_test_ids = []
         if no_test_evidence:
             status = "not_tested"
             failures = []
@@ -437,10 +879,9 @@ try:
                     report_path.unlink()
                 try:
                     selected_command = config["pytest_command"][:-len(config["stable_test_ids"])] + selected_test_ids
-                    tested = subprocess.run(
+                    tested = run_with_process_group(
                         selected_command,
-                        capture_output=True, text=True, encoding="utf-8", errors="replace",
-                        timeout=config["timeout_seconds"], check=False,
+                        timeout=config["timeout_seconds"],
                     )
                 except subprocess.TimeoutExpired as exc:
                     status = "timeout"
@@ -470,7 +911,43 @@ try:
                         if item.get("outcome") == "error"
                     )
                     expected_count = len(selected_test_ids)
-                    if errors:
+                    environment_error_markers = (
+                        "cannot allocate memory",
+                        "memoryerror",
+                        "resource temporarily unavailable",
+                        "no space left on device",
+                        "permission denied",
+                        "timed out",
+                    )
+                    output_lower = (stdout + "\n" + stderr).lower()
+                    execution_server_readiness_error = (
+                        config.get("task_id") == "execution_server"
+                        and config.get("checkpoint_id") == "C1"
+                        and "server did not start:" in output_lower
+                        and "connection refused" in output_lower
+                        and bool(errors)
+                        and all(
+                            test_id.endswith("::TestCore::test_initial_stats")
+                            for test_id in errors
+                        )
+                    )
+                    has_environment_error = any(
+                        marker in output_lower for marker in environment_error_markers
+                    ) or (
+                        "connection refused" in output_lower
+                        and not execution_server_readiness_error
+                    )
+                    test_error_is_mutant_kill = (
+                        bool(errors)
+                        and set(errors) <= set(selected_test_ids)
+                        and mutant["mutmut_status"] == "killed"
+                        and not has_environment_error
+                    )
+                    if test_error_is_mutant_kill:
+                        status = "killed"
+                        error_test_ids = errors
+                        error = None
+                    elif errors:
                         status = "error"
                         error = f"pytest result incomplete: collected {len(outcomes)} of {expected_count}; errors={errors}"
                     elif failures:
@@ -497,11 +974,18 @@ try:
             "source_changed": changed,
             "pytest_exit_code": pytest_exit_code,
             "failed_test_ids": failures,
+            "error_test_ids": error_test_ids,
+            "classification_rationale": (
+                "execution_server C1 test_initial_stats readiness error was caused by a raw-killed mutant; the fixture's final connection-refused text can be stale after a non-200 response"
+                if error_test_ids and execution_server_readiness_error else
+                "stable selected test reported an error for a raw-killed mutant; recorded as killed with the test error retained as evidence"
+                if error_test_ids else None
+            ),
             "error": error,
             "elapsed_seconds": round(time.monotonic() - started, 3),
         }
-        if status in {"error", "timeout"}:
-            log(json.dumps({"mutant_id": mutant_id, "status": status, "error": error, "apply_stdout": apply_stdout[-2000:], "apply_stderr": apply_stderr[-2000:], "pytest_stdout": stdout[-6000:], "pytest_stderr": stderr[-3000:]}, ensure_ascii=False))
+        if status in {"error", "timeout"} or error_test_ids:
+            log(json.dumps({"mutant_id": mutant_id, "status": status, "error": error, "error_test_ids": error_test_ids, "apply_stdout": apply_stdout[-2000:], "apply_stderr": apply_stderr[-2000:], "pytest_stdout": stdout[-6000:], "pytest_stderr": stderr[-3000:]}, ensure_ascii=False))
         record_result(record)
         completed.add(mutant_id)
         if number == 1 or number % 10 == 0 or number == total:
@@ -527,10 +1011,13 @@ summary = {
     "mutant_count": total,
     "classified_count": len(records),
     "status_counts": counts,
-    "complete": len(records) == total and all(item["direct_status"] in {"killed", "survived", "not_tested"} for item in records),
+    "test_error_kill_count": sum(bool(record.get("error_test_ids")) for record in records),
+    "complete": len(records) == total and all(item["direct_status"] in {"killed", "survived", "not_tested", "error", "timeout"} for item in records),
+    "all_attempts_resolved": len(records) == total and all(item["direct_status"] in {"killed", "survived", "not_tested"} for item in records),
+    "inconclusive_count": sum(counts.get(status, 0) for status in ("not_tested", "error", "timeout")),
     "classification_algorithm_version": config["classification_algorithm_version"],
     "classification_config_sha256": config["classification_config_sha256"],
-    "classification_method": "mutmut apply followed by stable passing C1 tests selected from subprocess-hit data; raw no-test statuses without matching subprocess hits are recorded as not_tested (not as survivors), and unmatched mutants use the full stable suite",
+    "classification_method": "mutmut apply followed by stable passing C1 tests selected from subprocess-hit data; raw no-test statuses without matching subprocess hits are recorded as not_tested (not as survivors), and unmatched mutants use the full stable suite; execution errors and timeouts remain explicit inconclusive outcomes",
     "created_at_utc": datetime.now(timezone.utc).isoformat(),
 }
 (root / config["summary_path"]).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
@@ -580,7 +1067,7 @@ def main() -> int:
         mutmut_run_manifest.get("mutation_protocol_version") != MUTATION_PROTOCOL_VERSION
         or not mutmut_run_manifest.get("mutation_config_sha256")
         or mutmut_run_manifest.get("bridge_sha256") != {
-            name: sha256_file(path) for name, path in MUTATION_BRIDGES.items()
+            name: sha256_file(runtime_dir / name) for name in MUTATION_BRIDGES
         }
         or mutmut_run_manifest.get("mutation_config", {}).get("runtime_config_sha256")
         != sha256_file(REPO_ROOT / "config" / "checkpoint_runtime.json")
@@ -590,11 +1077,11 @@ def main() -> int:
     task_id = str(runtime_manifest["task_id"])
     checkpoint_id = str(runtime_manifest["checkpoint_id"])
     baseline = matching_baseline(audit_path, task_id, checkpoint_id)
-    stable_ids = list(baseline["stable_pass_test_ids"])
+    stable_ids = stable_pass_selection(baseline)
     if (
         runtime_manifest.get("base_tests_sha256") != baseline.get("base_tests_sha256")
         or mutmut_run_manifest.get("base_tests_sha256") != baseline.get("base_tests_sha256")
-        or mutmut_run_manifest.get("mutation_test_selection") != stable_ids
+        or set(mutmut_run_manifest.get("mutation_test_selection") or []) != set(stable_ids)
     ):
         raise ValueError("mutmut run does not match the repeated C1 baseline and selected stable test IDs")
     result_file = runtime_dir / "mutmut-results.txt"
@@ -639,7 +1126,7 @@ def main() -> int:
             if name and test_id in stable_test_id_set:
                 function_tests.setdefault(name, set()).add(test_id)
     mutant_test_ids = {
-        mutant_id: sorted(function_tests[mutant_id.rsplit("__mutmut_", 1)[0]])
+        mutant_id: [test_id for test_id in stable_ids if test_id in function_tests[mutant_id.rsplit("__mutmut_", 1)[0]]]
         for mutant_id in statuses
         if mutant_id.rsplit("__mutmut_", 1)[0] in function_tests
     }
@@ -677,6 +1164,19 @@ def main() -> int:
             raise ValueError("direct-classification config changed; refusing to mix results, use a fresh mutmut runtime")
     elif (runtime_dir / config["results_path"]).exists():
         raise ValueError("direct-classification results already exist; use --resume with an identical config or a fresh mutmut runtime")
+    if args.resume:
+        recovered = recover_parallel_worker_results(
+            runtime_dir,
+            config,
+            runtime_dir / config["results_path"],
+        )
+        retried = retry_inconclusive_records(runtime_dir, runtime_dir / config["results_path"])
+        if recovered or retried:
+            print(
+                "Recovered "
+                f"{recovered} partial worker results; archived and retrying "
+                f"{retried} inconclusive direct-classification attempts"
+            )
     worker_path = runtime_dir / "direct_mutant_classification_worker.py"
     write_text_file(config_path, json.dumps(config, indent=2) + "\n")
     write_text_file(worker_path, WORKER)

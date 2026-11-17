@@ -98,15 +98,15 @@ number of events shared or unique to each method.
    LLM-only judge, mark low-confidence or flagged cases inconclusive, then map deduplicated event
    IDs back to methods.
 
-## Formal cohort execution status (updated 2026-11-14)
+## Formal cohort execution status (updated 2026-11-16)
 
 | Requirement | Status | Evidence / next action |
 | --- | --- | --- |
 | Runner and problem source pinned | Complete | `config/benchmarks.lock.json`; the Release snapshots and run manifests are accepted as the frozen trajectories for this cohort |
 | Checkpoint packages and visibility | Complete | 196 packages across 36 tasks; sanitized C1 `base_tests` are the shared legal suite; hidden, future, excluded, and reference inputs stay outside generators |
-| C1 baseline | Complete | 36/36 tasks audited for three repetitions; 26 stable-with-failures, 10 stable-pass, zero unusable; audit SHA-256 is recorded in [pre-evaluation readiness](pre_evaluation_readiness.md) |
-| Coverage integrity | Complete | 36/36 C1 tasks linked to the final base-audit hash; no audit errors |
-| Runtime and mutation execution | Validated at representative scale | Direct mutmut and subprocess association work on `cfgpipe` and `eve_route_planner`; hash-matched mutant summaries exist for 8/36 tasks |
+| C1 baseline | Complete | 36/36 records in [current sanitized baseline audit](../artifacts/results/rq1_full_36x1/c1_base_audit_current_sanitized_20261116/c1_base_suite_audit.json); `execution_server/C1` was freshly repeated 3/3 on its current sanitized package (24 stable passing tests) |
+| Coverage integrity | Complete | [Current coverage audit](../artifacts/results/rq1_full_36x1/c1_coverage_integrity_current_sanitized_20261116.json) verifies 36/36 source and base-test hashes; `execution_server/C1` line coverage is 79.38% |
+| Runtime and mutation execution | Complete inventory | Direct classification is hash-matched for 36/36 tasks (22,337 mutants: 12,800 killed, 8,490 survived, 1,047 inconclusive). The [survivor-only input package](../artifacts/results/rq1_full_36x1/survivor_only_input_v1/README.md) contains 8,490 survivors; inconclusive outcomes remain excluded and documented |
 | Vanilla C1 suites | Generation and validation artifacts available | 36 hash-linked manifests; 48 retained candidates across 25 suites. Complete the final audit against the canonical paired budget and candidate-review records |
 | Mutation-Guided C1 suites | Pilot only | 4 hash-linked manifests across 36 tasks; two have test files. Complete survivor triage and budget-matched generation/validation across the cohort |
 | Candidate correctness review | Pilot calibrated, integration pending | Standalone LLM reviewer distinguishes one supported and one contradictory candidate; integrate into both generation cohort workflows and archive every verdict |

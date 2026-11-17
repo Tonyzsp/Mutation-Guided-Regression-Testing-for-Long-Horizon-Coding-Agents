@@ -88,8 +88,10 @@ def checkpoint_future(value: str, checkpoint_number: int) -> bool:
 
 
 def has_marker_token(value: str, marker: str) -> bool:
-    """Match category words in names such as CHECKPOINT_1_HIDDEN_CASES."""
-    return marker in re.split(r"[^a-z0-9]+", value.casefold())
+    """Match category words in snake_case and CamelCase names."""
+    separated = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value)
+    separated = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", separated)
+    return marker in re.split(r"[^a-z0-9]+", separated.casefold())
 
 
 def is_test_source(relative: Path) -> bool:
@@ -112,17 +114,19 @@ def node_category(
         names.append(node.target.id)
 
     folded_names = [name.casefold() for name in names]
-    referenced_names = {
-        item.id.casefold()
+    referenced_original_names = {
+        item.id
         for item in ast.walk(node)
         if isinstance(item, ast.Name)
     }
+    referenced_names = {name.casefold() for name in referenced_original_names}
     all_names = set(folded_names) | referenced_names
-    if any(has_marker_token(name, "hidden") for name in all_names):
+    marker_names = set(names) | referenced_original_names
+    if any(has_marker_token(name, "hidden") for name in marker_names):
         return "hidden"
     if any(
         checkpoint_future(name, checkpoint_number) or has_marker_token(name, "future")
-        for name in all_names
+        for name in marker_names
     ):
         return "future"
     if any(re.search(r"(?:^|_)(?:future|later)_?(?:cases|tests|data)(?:$|_)", name) for name in folded_names):
