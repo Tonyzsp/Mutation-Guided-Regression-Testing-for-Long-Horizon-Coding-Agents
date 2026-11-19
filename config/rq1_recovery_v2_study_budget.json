@@ -1,0 +1,39 @@
+{
+  "format": "rq1-recovery-v2-generator-adapter-budget/v1",
+  "experiment_id": "rq1_full_36x1_recovery_v2",
+  "scope": "One independent generation call in one isolated call directory; cohort-wide two-call and eight-candidate caps are enforced by the recovery coordinator.",
+  "model": {
+    "provider": "openai_codex",
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "temperature": null,
+    "decoding": "Codex service default"
+  },
+  "generation": {
+    "model": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "max_calls_per_method_task": 1,
+    "max_candidates_per_method_task": 4,
+    "requested_output_tokens_per_call": 4096,
+    "requested_output_tokens_per_method_task": 4096
+  },
+  "mutant_hint_selection": {
+    "guided_max_hints_per_task": 16
+  },
+  "candidate_review": {
+    "reviewer_model": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "method_blind": true,
+    "calls_per_method_task_max": 1,
+    "candidates_per_review_call_max": 8,
+    "max_total_calls": 56,
+    "requested_output_tokens_per_call": 2048,
+    "retry_policy": "No retry after a response; malformed or failed review retains no candidates."
+  },
+  "source_checkpoint_validation": {
+    "candidate_plus_base_repeat_runs": 3,
+    "final_combined_suite_repeat_runs_per_method_task": 3,
+    "guided_target_mutant_repeat_runs": 3,
+    "timeout_seconds_per_run": 900
+  }
+}

@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from model_input_policy import exclusions_for_package
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PACKAGE_ROOT = REPO_ROOT / "data" / "checkpoints" / "checkpoint_packages_rq1_full_36x1"
@@ -28,6 +30,42 @@ MAX_INPUT_FILE_BYTES = 2_000_000
 
 def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def load_locked_study_budget(path: Path) -> tuple[dict[str, Any], str]:
+    resolved = path.resolve(strict=True)
+    lock_path = resolved.with_name(f"{resolved.stem}.lock.json")
+    lock = read_json(lock_path)
+    actual_sha = sha256_bytes(Path(filesystem_path(resolved)).read_bytes())
+    if (
+        not resolved.is_relative_to(REPO_ROOT.resolve(strict=True))
+        or lock.get("budget_path") != resolved.relative_to(REPO_ROOT).as_posix()
+        or lock.get("sha256") != actual_sha
+    ):
+        raise ValueError("study-budget SHA-256 differs from its adjacent lock")
+    study_budget = read_json(resolved)
+    if study_budget.get("experiment_id") != lock.get("experiment_id"):
+        raise ValueError("study-budget experiment ID differs from its lock")
+    return study_budget, actual_sha
+
+
+def validate_paired_budget(budget_config: dict[str, Any], study_budget: dict[str, Any]) -> None:
+    configured = budget_config["budget"]
+    formal = study_budget["generation"]
+    model = budget_config["model"]
+    expected = {
+        "max_calls": formal["max_calls_per_method_task"],
+        "max_candidates": formal["max_candidates_per_method_task"],
+        "per_call_output_tokens": formal["requested_output_tokens_per_call"],
+        "max_output_tokens": formal["requested_output_tokens_per_method_task"],
+    }
+    for name, value in expected.items():
+        if configured.get(name) != value:
+            raise ValueError(f"generation budget {name}={configured.get(name)!r} differs from frozen study value {value!r}")
+    if model.get("model_id") != formal["model"] or model.get("reasoning_effort") != formal["reasoning_effort"]:
+        raise ValueError("generation model/reasoning setting differs from the frozen full-study budget")
+    if budget_config.get("validation", {}).get("repeat_runs") != study_budget["source_checkpoint_validation"]["candidate_plus_base_repeat_runs"]:
+        raise ValueError("C1 candidate repeat count differs from the frozen full-study budget")
 
 
 def filesystem_path(path: Path) -> str:
@@ -67,9 +105,14 @@ def safe_package_path(root: Path, relative: str, field: str) -> Path:
     return resolved
 
 
-def gather_text_files(root: Path) -> list[tuple[str, str, str, int]]:
+def gather_text_files(
+    root: Path,
+    *,
+    excluded_relative_paths: set[str] | None = None,
+) -> list[tuple[str, str, str, int]]:
     records: list[tuple[str, str, str, int]] = []
     root_ext = filesystem_path(root)
+    excluded_relative_paths = excluded_relative_paths or set()
     files: list[tuple[str, Path]] = []
     for current, directories, names in os.walk(root_ext):
         directories.sort()
@@ -78,6 +121,8 @@ def gather_text_files(root: Path) -> list[tuple[str, str, str, int]]:
             relative = os.path.relpath(absolute, root_ext).replace(os.sep, "/")
             files.append((relative, Path(absolute)))
     for relative, path in sorted(files):
+        if relative in excluded_relative_paths:
+            continue
         resolved = Path(filesystem_path(path)).resolve(strict=True)
         if not resolved.is_relative_to(Path(filesystem_path(root)).resolve(strict=True)):
             raise ValueError(f"input symlink escapes allowed root: {relative}")
@@ -117,12 +162,16 @@ def render_prompt(
     *,
     template_path: Path = PROMPT_TEMPLATE,
     extra_template_values: dict[str, str] | None = None,
+    input_consumer: str = "vanilla_generation",
 ) -> tuple[str, dict[str, Any]]:
     workspace = safe_package_path(package_root, package["workspace_path"], "workspace_path")
     base_tests = safe_package_path(package_root, package["base_tests_path"], "base_tests_path")
     specification = safe_package_path(package_root, package["specification_path"], "specification_path")
     workspace_files = gather_text_files(workspace)
-    base_files = gather_text_files(base_tests)
+    excluded_paths, excluded_records, exclusion_policy_sha = exclusions_for_package(
+        package_root, package, root_name="base_tests", consumer=input_consumer
+    )
+    base_files = gather_text_files(base_tests, excluded_relative_paths=excluded_paths)
     specification_text = read_text_file(specification)
 
     def format_files(files: list[tuple[str, str, str]], root_name: str) -> str:
@@ -141,7 +190,13 @@ def render_prompt(
         "MAX_OUTPUT_TOKENS": str(budget["max_output_tokens"]),
         "SPECIFICATION": specification_text,
         "SOURCE_SNAPSHOT": format_files(workspace_files, "workspace"),
-        "BASE_TEST_SUITE": format_files(base_files, "base_tests"),
+        "BASE_TEST_SUITE": format_files(base_files, "base_tests") + (
+            "\n\n[Model-input exclusions applied: " + "; ".join(
+                f"{row['path']} omitted ({row['reason']}; sha256={row['sha256']})"
+                for row in excluded_records
+            ) + "]. The original checkpoint package remains unchanged for test execution."
+            if excluded_records else ""
+        ),
         "TARGET_MUTATION_SECTION": "",
         **(extra_template_values or {}),
     }
@@ -194,6 +249,10 @@ def render_prompt(
         "input_files": input_records,
         "excluded_roots": ["data/hidden_tests", "data/future_tests", "data/excluded_tests", "later checkpoints"],
     }
+    if excluded_records:
+        manifest["model_input_exclusion_policy_id"] = "rq1_c1_future_reference_exclusion_v1"
+        manifest["model_input_exclusion_policy_sha256"] = exclusion_policy_sha
+        manifest["excluded_model_inputs"] = excluded_records
     return prompt, manifest
 
 
@@ -295,8 +354,9 @@ def main() -> int:
     if package["task_id"] != package_root.parent.name or package["checkpoint_id"] != package_root.name:
         raise ValueError("package path does not match its task/checkpoint identifiers")
     budget_config = read_json(args.budget_config)
-    study_budget_config = read_json(args.study_budget_config.resolve(strict=True))
-    expected_generation_config = study_budget_config.get("generation_budget_config")
+    study_budget, study_budget_sha = load_locked_study_budget(args.study_budget_config)
+    validate_paired_budget(budget_config, study_budget)
+    expected_generation_config = study_budget.get("generation_budget_config") or study_budget.get("generation", {}).get("budget_source")
     if expected_generation_config != args.budget_config.resolve(strict=True).relative_to(REPO_ROOT).as_posix():
         raise ValueError("study budget does not authorize the selected generation budget configuration")
     configured_schema = budget_config.get("output_schema")
@@ -322,6 +382,9 @@ def main() -> int:
     input_manifest["study_budget_config"] = prompt_resource(
         args.study_budget_config.resolve(strict=True), "full-study budget configuration"
     )
+    input_manifest["study_budget_id"] = study_budget["experiment_id"]
+    input_manifest["study_budget_sha256"] = study_budget_sha
+    input_manifest["formal_eligibility"] = True
     input_manifest["budget_id"] = budget_config["budget_id"]
     if args.opportunity_brief:
         input_manifest["opportunity_brief"] = prompt_resource(args.opportunity_brief, "opportunity brief")
@@ -507,8 +570,10 @@ def main() -> int:
         "method": "vanilla_llm",
         "model_config_id": budget_config["model"]["model_config_id"],
         "budget_id": budget_config["budget_id"],
-        "study_budget_id": study_budget_config["budget_id"],
         "study_budget_config": input_manifest["study_budget_config"],
+        "study_budget_id": study_budget["experiment_id"],
+        "study_budget_sha256": study_budget_sha,
+        "formal_eligibility": True,
         "prompt_template_version": budget_config.get("prompt_template_version", "vanilla_v1"),
         "input_manifest_path": "input_manifest.json",
         "prompt_archive_path": "prompt_archive.md",

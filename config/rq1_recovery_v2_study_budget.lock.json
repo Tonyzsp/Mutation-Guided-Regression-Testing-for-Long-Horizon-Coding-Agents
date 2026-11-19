@@ -1,0 +1,7 @@
+{
+  "format": "rq1-recovery-study-budget-lock/v2",
+  "experiment_id": "rq1_full_36x1_recovery_v2",
+  "budget_path": "config/rq1_recovery_v2_study_budget.json",
+  "sha256": "2c5f8ee41d372c6459c2a30145af3be79533938b048e198ab2e74e604ca51c37",
+  "change_policy": "Any execution-budget change requires a new recovery version."
+}

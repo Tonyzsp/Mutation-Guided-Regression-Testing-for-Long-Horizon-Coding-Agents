@@ -973,7 +973,7 @@ def main() -> int:
             if sha256_file(triage_path) != triage_hash:
                 raise ValueError("mutant-triage record changed after generation")
             triage = read_json(triage_path)
-            if triage.get("schema_version") != "rq1-mutant-triage/v1":
+            if triage.get("schema_version") not in {"rq1-mutant-triage/v1", "rq1-mutant-triage/v2"}:
                 raise ValueError("unsupported mutant-triage schema")
             if triage.get("mutation_record_set_sha256") != input_manifest["mutation_record_set_sha256"]:
                 raise ValueError("mutant triage does not match the archived raw mutation set")
@@ -1098,7 +1098,14 @@ def main() -> int:
     candidates_root.mkdir(exist_ok=True)
     frozen_root = generation_dir / "frozen_suite"
     frozen_base = frozen_root / "base_tests"
-    frozen_generated = frozen_root / "generated_tests"
+    frozen_generated_name = "generated_tests"
+    frozen_generated = frozen_root / frozen_generated_name
+    if len(str(frozen_generated.resolve())) >= 240:
+        # Keep enough headroom for candidate filenames on Windows MAX_PATH hosts.
+        frozen_generated_name = "gen"
+        frozen_generated = frozen_root / frozen_generated_name
+    if len(str(frozen_generated.resolve())) >= 248:
+        raise ValueError("frozen generated-test directory exceeds the supported Windows path limit")
     frozen_root.mkdir()
     shutil.copytree(
         filesystem_path(package_root / package["base_tests_path"]),
@@ -1282,7 +1289,7 @@ def main() -> int:
         "method": method,
         "suite_path": "frozen_suite",
         "base_suite_path": "frozen_suite/base_tests",
-        "generated_test_paths": [f"frozen_suite/generated_tests/{item['relative_path']}" for item in accepted],
+        "generated_test_paths": [f"frozen_suite/{frozen_generated_name}/{item['relative_path']}" for item in accepted],
         "validation_log_path": "validation.jsonl",
         "suite_sha256": suite_hash,
         "model_config_id": generation_run["model_config_id"],

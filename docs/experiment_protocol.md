@@ -29,6 +29,13 @@ inputs.
 `hidden` files must never be copied into a checkpoint package, generated-test prompt, test
 generation workspace, adjudication bundle, or version-controlled experiment output.
 
+The original full-study analysis plan and its locked limits are preserved in [RQ1 Formal Protocol and Budget v1](rq1_formal_protocol_and_budget_v1.md) and
+[`config/rq1_full_study_budget_v1.json`](../config/rq1_full_study_budget_v1.json). The current
+MG generation, validation, freezing, and later-evaluation rules are consolidated in the
+[Unified Mutation-Guided Protocol](rq1_mutation_guided_unified_protocol.md). Do not use the
+archived batch documents as separate current MG protocols or infer equal total compute from
+call-count limits.
+
 Original is the complete legal `base_tests` bundle supplied for the source checkpoint. Do not
 create an additional visible/held-out split. The Release isolation manifest places
 `file_backup/errors` under `data/excluded_tests/`; it stays outside all generators and RQ1
@@ -82,6 +89,18 @@ The headline RQ1 result is therefore: confirmed, adjudicated candidate regressio
 method under equal generation budgets. Report raw candidate counts, adjudication outcomes, and the
 number of events shared or unique to each method.
 
+## Frozen study budgets
+
+The formal generation budget is GPT-6 Luna medium, at most 3 calls and 8 candidate files per
+method/task, with 4,096 requested output tokens per call and no repair calls. The full 36-task
+cohort therefore has upper bounds of 216 generation calls and 576 candidate files. Before
+generation, the Guided hint pool is limited to 16 deterministically selected survivor-family
+representatives per task. Candidate validation uses three C1 repetitions; later-checkpoint
+evaluation covers 160 task/checkpoint pairs and at most 480 initial suite runs across three
+methods. Each qualifying failure is reproduced three times and sent to the same method-blind LLM
+judge under a per-case two-attempt limit. The detailed execution formulas and gates are in the
+linked protocol and JSON configuration above.
+
 ## Pilot workflow
 
 1. Verify the sanitized checkpoint packages with `python scripts/validate_checkpoint_package.py`.
@@ -107,10 +126,10 @@ number of events shared or unique to each method.
 | C1 baseline | Complete | 36/36 records in [current sanitized baseline audit](../artifacts/results/rq1_full_36x1/c1_base_audit_current_sanitized_20261116/c1_base_suite_audit.json); `execution_server/C1` was freshly repeated 3/3 on its current sanitized package (24 stable passing tests) |
 | Coverage integrity | Complete | [Current coverage audit](../artifacts/results/rq1_full_36x1/c1_coverage_integrity_current_sanitized_20261116.json) verifies 36/36 source and base-test hashes; `execution_server/C1` line coverage is 79.38% |
 | Runtime and mutation execution | Complete inventory | Direct classification is hash-matched for 36/36 tasks (22,337 mutants: 12,800 killed, 8,490 survived, 1,047 inconclusive). The [survivor-only input package](../artifacts/results/rq1_full_36x1/survivor_only_input_v1/README.md) contains 8,490 survivors; inconclusive outcomes remain excluded and documented |
-| Vanilla C1 suites | Generation and validation artifacts available | 36 hash-linked manifests; 48 retained candidates across 25 suites. Complete the final audit against the canonical paired budget and candidate-review records |
-| Mutation-Guided C1 suites | Pilot only | 4 hash-linked manifests across 36 tasks; two have test files. Complete survivor triage and budget-matched generation/validation across the cohort |
-| Candidate correctness review | Pilot calibrated, integration pending | Standalone LLM reviewer distinguishes one supported and one contradictory candidate; integrate into both generation cohort workflows and archive every verdict |
-| Formal paired generation budget | Needs final lock | Existing configs include formal and pilot variants. Select one canonical paired budget and reference its hash in both method runs |
+| Vanilla C1 suites | Generation artifacts need final audit | 35/36 prior formal-v4 task inputs match current C1 package hashes; `execution_server/C1` is stale and must not be reused. Historical 76/48 aggregate is not a current formal total |
+| Mutation-Guided C1 suites | Pilot only | Existing hash-linked runs are incomplete; four older `eve_route_planner` runs with mismatched base-test hashes are excluded. Complete the bounded survivor-family selection and 36-task cohort |
+| Candidate correctness review | Pilot calibrated, full cohort pending | Use method-blind GPT-6 Luna medium review batches; maximum one call per method/task and 72 cohort calls |
+| Formal paired generation and evaluation budget | Frozen as protocol v1; runner enforcement pending | See [`rq1_full_study_budget_v1.json`](../config/rq1_full_study_budget_v1.json); update run manifests and enforce its hint-selection and evaluation retry limits before starting |
 | Later-checkpoint evaluation | Not started | Begin only after all Original/Vanilla/Guided suites and the 36-task pre-evaluation integrity manifest pass |
 | Regression adjudication and RQ1 report | Not started | Use the same frozen method-blind LLM judge for every suite; low-confidence or malformed reviews remain inconclusive |
 

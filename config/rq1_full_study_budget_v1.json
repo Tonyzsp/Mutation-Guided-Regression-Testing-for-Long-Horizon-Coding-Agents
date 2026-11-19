@@ -1,47 +1,143 @@
 {
-  "schema_version": 1,
-  "budget_id": "rq1-full-study-v1",
-  "scope": "RQ1 C1 generation, validation, later-checkpoint execution, and blinded adjudication for the locked 36-task cohort.",
-  "generation_budget_config": "config/generation_budget_rq1_c1_cohort_formal.json",
+  "format": "rq1-full-study-budget/v1",
+  "experiment_id": "rq1_full_36x1_formal_v1",
+  "status": "protocol-frozen-runner-enforcement-pending",
+  "scope": "Complete RQ1 from C1 test generation through later-checkpoint regression adjudication; excludes RQ2 and RQ3",
+  "cohort": {
+    "task_count": 36,
+    "checkpoint_package_count": 196,
+    "source_checkpoint": "C1",
+    "later_checkpoint_pairs": 160,
+    "methods": ["original", "vanilla_llm", "mutation_guided"],
+    "generator_input": "Sanitized source-checkpoint specification, workspace, and complete legal base_tests only",
+    "forbidden_generator_inputs": ["hidden tests", "future checkpoint data", "excluded tests", "reference solutions", "regression outcomes"]
+  },
   "model": {
     "provider": "openai_codex",
     "model_id": "gpt-6-luna",
     "reasoning_effort": "medium",
-    "decoding": "service_default"
+    "temperature": null,
+    "decoding": "Codex service default",
+    "record_cli_version_and_service_model_id_when_available": true
   },
-  "survivor_hint_triage": {
-    "enabled_for": "mutation_guided_only",
-    "max_representatives_per_task": 16,
-    "max_eligible_hints_per_task": 16,
-    "max_started_calls_per_task": 2,
-    "normal_calls_per_task": 1,
-    "retry_policy": "One technical retry is allowed only when no structured response was captured before the request failed.",
-    "selection_rule": "Group by task, file, function, mutmut operator, and normalized AST edit; select each family's lexicographically smallest mutant ID, stratify by source_file/operator, and rotate deterministically."
+  "mutant_hint_selection": {
+    "survivor_inventory_count_at_protocol_freeze": 8490,
+    "inconclusive_inventory_count_at_protocol_freeze": 1047,
+    "inconclusive_items_are_hints": false,
+    "family_key": ["task_id", "source_file", "enclosing_function", "mutmut_operator_or_inferred_ast_kind", "normalized_ast_edit"],
+    "operator_field_policy": "Use the raw mutmut operator when present. If null, infer a conservative operator/edit kind from the old/new AST in the diff and mark it as inferred; never represent an inferred label as mutmut-provided.",
+    "representative_rule": "Choose the lexicographically smallest stable mutant ID in each family.",
+    "per_task_family_cap": 16,
+    "selection_rule": "Sort family representatives within each (source_file, operator_or_inferred_ast_kind) stratum by mutant ID; take one per stratum in sorted round-robin order until the cap is reached.",
+    "triage": {
+      "model": "gpt-6-luna",
+      "reasoning_effort": "medium",
+      "max_calls_per_task": 1,
+      "max_technical_retries_per_task": 1,
+      "max_total_calls": 72,
+      "max_requested_output_tokens_total": 147456,
+      "max_family_representatives_per_call": 16,
+      "requested_output_tokens_per_call": 2048,
+      "timeout_seconds_per_attempt": 900,
+      "retry_only_if_no_structured_response": true,
+      "malformed_or_unavailable_result": "Mark selected families deferred; do not silently pass them to Guided generation."
+    },
+    "unselected_survivor_status": "deferred_by_preregistered_hint_budget",
+    "guided_max_hints_per_task": 16,
+    "future_results_used_for_selection": false,
+    "triage_cost_is_separate_from_generation_budget": true
   },
-  "candidate_correctness_review": {
-    "max_started_calls_per_method_task": 1,
-    "max_candidates_per_review": 8,
-    "per_call_output_tokens": 4096,
-    "retry_policy": "No retry after a failed, invalid, or uncertain review response; retain only candidates with verdict correct."
+  "generation": {
+    "budget_source": "config/generation_budget_rq1_c1_cohort_formal.json",
+    "budget_source_sha256": "b1ff7c44533e6ea813edad74d6b49d3365168985678acddbd7f0b70d206ae1f3",
+    "model": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "max_calls_per_method_task": 3,
+    "max_candidates_per_method_task": 8,
+    "candidate_unit": "One candidate file with exactly one top-level pytest test function.",
+    "requested_output_tokens_per_call": 4096,
+    "requested_output_tokens_per_method_task": 12288,
+    "budget_dimensions_binding": ["launched_calls", "candidate_file_count"],
+    "repair_calls": 0,
+    "generation_assessment_uses_generation_call": true,
+    "retry_policy": "Up to two retries only when the process fails before a structured response is captured; a completed response, including an empty or invalid response, is never regenerated.",
+    "token_usage_policy": "Record reported input/output tokens. Codex CLI does not enforce a hard output-token ceiling; token targets are requested limits, not guaranteed equality of total inference cost.",
+    "vanilla_input": "Shared C1 specification, workspace, complete legal base_tests, and shared gap brief.",
+    "guided_additional_input": "At most 16 preselected, C1-only eligible survivor-family IDs, locations, and diffs.",
+    "vanilla_mutant_information": false,
+    "max_generation_calls_total": 216,
+    "max_candidate_files_total": 576,
+    "max_requested_generation_output_tokens_total": 884736
   },
-  "source_validation": {
-    "repeat_runs": 3,
-    "timeout_seconds": 900,
+  "candidate_review": {
+    "reviewer_model": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "method_blind": true,
+    "calls_per_method_task_max": 1,
+    "candidates_per_review_call_max": 8,
+    "max_total_calls": 72,
+    "max_requested_output_tokens_total": 147456,
+    "requested_output_tokens_per_call": 2048,
+    "retry_policy": "No retry after a response; failed or malformed review means candidates remain unretained.",
+    "retain_only_verdict": "correct",
+    "uncertain_verdict": "Reject from the retained suite; no human review is budgeted."
+  },
+  "source_checkpoint_validation": {
+    "candidate_collection_attempts": 1,
+    "candidate_plus_base_repeat_runs": 3,
+    "final_combined_suite_repeat_runs_per_method_task": 3,
     "guided_target_mutant_repeat_runs": 3,
-    "repair_calls": 0
+    "timeout_seconds_per_run": 900,
+    "baseline_failures": "Reuse the hash-matched 36-task C1 baseline audit; generated candidates may not add a new stable failure.",
+    "max_candidate_plus_base_runs": 1728,
+    "max_guided_target_mutant_runs": 864,
+    "max_final_combined_suite_runs": 324,
+    "rule": "A generated candidate is retained only if it collects, is judged specification-correct, passes as an individual test in all three runs, and introduces no new stable failure relative to the hash-matched C1 baseline audit; pre-existing baseline failures do not invalidate an otherwise passing candidate. A Guided candidate must additionally fail as an assertion on its named target mutant in all three fresh runs."
   },
   "later_checkpoint_evaluation": {
-    "suite_timeout_seconds": 900,
-    "infrastructure_retries": 1,
-    "targeted_reproduction_runs": 3,
-    "application_failures_are_not_retried": true
+    "source_checkpoint": "C1",
+    "target_checkpoint_pairs": 160,
+    "methods_per_target": 3,
+    "max_initial_suite_runs": 480,
+    "timeout_seconds_per_suite_run": 900,
+    "technical_retry_limit_per_suite_target": 1,
+    "max_infrastructure_retry_runs": 480,
+    "retry_only_for_infrastructure_failure": true,
+    "application_assertion_failure_is_retried_as_full_suite": false,
+    "candidate_failure_reproduction_runs": 3,
+    "candidate_eligibility": "The exact test ID passed in the source C1 audit and fails in a complete target run.",
+    "timeout_or_setup_error": "Infrastructure/inconclusive; never count as a regression without a reproducible application assertion failure.",
+    "candidate_reproduction_budget_formula": "Three targeted runs for each distinct eligible test failure observed in an initial later-checkpoint run; denote the number of observations by O, so at most 3*O targeted runs.",
+    "identical_suite_hashes": "May share one execution per task/target and are attributed to each matching method."
   },
-  "adjudication": {
-    "model_id": "gpt-6-luna",
+  "regression_adjudication": {
+    "judge_model": "gpt-6-luna",
     "reasoning_effort": "medium",
-    "max_started_calls_per_case": 2,
-    "per_call_output_tokens": 2048,
+    "method_blind": true,
+    "one_case_per_stable_candidate_observation": true,
+    "attempts_per_case_max": 2,
+    "retry_only_if_no_valid_structured_response": true,
+    "requested_output_tokens_per_attempt": 2048,
+    "timeout_seconds_per_attempt": 900,
     "confidence_threshold": 0.8,
-    "method_blind": true
+    "human_review": false,
+    "below_threshold_or_conflict": "inconclusive",
+    "judge_call_budget_formula": "2*N, where N is the number of stable candidate observations admitted to adjudication; N is frozen from the evaluation output before judge calls.",
+    "judge_input": "Source and target specifications, frozen test, source-to-target workspace diff, checkpoint evidence, failure trace, and three reproduction summaries. No hidden/future tests or method label."
+  },
+  "analysis": {
+    "primary_outcome": "Unique LLM-confirmed candidate regression events detected by each method.",
+    "event_deduplication": "Count the same underlying task/behavior/code-change event once across tests, methods, and later checkpoints; anchor it to the earliest failing target checkpoint.",
+    "primary_contrasts": ["mutation_guided_vs_original", "mutation_guided_vs_vanilla_llm"],
+    "paired_unit": "task trajectory",
+    "uncertainty": "10,000-resample task-cluster bootstrap 95% confidence intervals for paired count differences; paired permutation tests with Holm correction across the two primary contrasts.",
+    "denominator": "Deduplicated union of candidate events exposed by at least one frozen suite and confirmed by adjudication.",
+    "absolute_regression_recall_claim": false,
+    "required_reporting": ["raw candidate observations", "confirmed events", "inconclusive and other verdicts", "shared and unique events", "per-task counts", "actual calls and token usage", "execution and triage cost"]
+  },
+  "fairness_statement": "Vanilla and Mutation-Guided have identical model, reasoning setting, call cap, requested output-token cap, candidate cap, retry rule, correctness-review budget, and source validation. Guided receives mutation hints as the treatment; its extra triage cost and larger actual input-token usage are reported separately. Do not claim equal total token expenditure unless service usage confirms it.",
+  "execution_gates": {
+    "before_formal_generation": "Run manifests must record this budget file's SHA-256; the runner must enforce the survivor-family hint cap, triage-call limit, generation/candidate caps, candidate review rule, and C1 validation repetitions. Verify current C1 package and legal-input hashes before generating.",
+    "before_later_checkpoint_evaluation": "After generation, all 36 tasks must have Original, Vanilla, and Mutation-Guided C1 suites or explicit empty-suite records. Audit package/base/suite/budget hashes, input isolation, and C1 stability. The evaluator must enforce the one-infrastructure-retry limit before it reads later checkpoint packages."
   }
 }

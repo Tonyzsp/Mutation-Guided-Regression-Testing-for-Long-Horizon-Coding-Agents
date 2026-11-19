@@ -1,0 +1,55 @@
+{
+  "format": "rq3-task-domain-taxonomy/v1",
+  "taxonomy_status": "exploratory_manual_primary_function_labels",
+  "source": "Sanitized C1 specifications in checkpoint_packages_rq1_full_36x1; these labels are not official SlopCodeBench domain metadata.",
+  "domains": {
+    "configuration_and_infrastructure": [
+      "cfgpipe",
+      "datagate",
+      "dag_execution",
+      "dynamic_buffer",
+      "dynamic_config_service_api",
+      "env_manager",
+      "execution_server",
+      "forge",
+      "layered_config_synthesizer",
+      "meshctl",
+      "migrate_configs"
+    ],
+    "data_processing_and_query": [
+      "database_migration",
+      "etl_pipeline",
+      "file_merger",
+      "file_query_tool",
+      "log_query",
+      "metric_transform_lang",
+      "xjq"
+    ],
+    "developer_and_test_tooling": [
+      "circuit_eval",
+      "code_search",
+      "recli",
+      "rejector",
+      "sith",
+      "test_translator",
+      "trajectory_api"
+    ],
+    "eve_industry_and_logistics": [
+      "eve_industry",
+      "eve_jump_planner",
+      "eve_market_tools",
+      "eve_route_planner"
+    ],
+    "files_documents_and_personal_tools": [
+      "file_backup",
+      "l2m",
+      "mvvault",
+      "pwd_manager",
+      "sheeteval"
+    ],
+    "web_and_network_services": [
+      "mocked_http",
+      "textdrop"
+    ]
+  }
+}

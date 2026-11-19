@@ -1,0 +1,63 @@
+{
+  "format": "rq1-recovery-scope-amendment/v1",
+  "experiment_id": "rq1_full_36x1_recovery_v2_mg_only_20261118",
+  "amendment_id": "rq1_full_36x1_recovery_v2_mg_only_20261118",
+  "date": "2026-11-18",
+  "parent_batch_id": "rq1_full_36x1_recovery_v2",
+  "parent_batch_sha256": "a7cb635c557f0de563dfcd746d40203d8cc2ca1645071480aa19308bc620de9d",
+  "scope": "Continue only Mutation-Guided recovery on the 27 tasks with zero retained MG tests in v1. Do not launch Vanilla or Original generation, review, validation, or comparative analysis.",
+  "existing_artifacts": {
+    "v1": "Immutable and unchanged.",
+    "v2_vanilla_generated_before_amendment": "Preserve as provenance only; exclude from the MG-only recovery outcomes and do not spend further calls on Vanilla.",
+    "v2_mutation_guided_on_mg_zero_tasks": "Reuse successful calls and triage already recorded under the parent batch. Never repeat a generation slot that has a model-attempt artifact or captured response. A local pre-request harness failure with zero model calls may be corrected in a separate child output path and linked to its original slot.",
+    "v2_mutation_guided_on_nonzero_mg_task": "The log_query call started before this amendment; preserve it as a pre-amendment artifact but exclude it from the MG recovery cohort and do not run its second slot. mocked_http receives no new MG call."
+  },
+  "mg_generation": {
+    "methods": ["mutation_guided"],
+    "recovery_tasks": 27,
+    "task_ids": [
+      "cfgpipe",
+      "circuit_eval",
+      "dag_execution",
+      "database_migration",
+      "datagate",
+      "dynamic_buffer",
+      "dynamic_config_service_api",
+      "env_manager",
+      "eve_industry",
+      "eve_market_tools",
+      "eve_route_planner",
+      "execution_server",
+      "file_merger",
+      "forge",
+      "l2m",
+      "layered_config_synthesizer",
+      "meshctl",
+      "metric_transform_lang",
+      "migrate_configs",
+      "mvvault",
+      "pwd_manager",
+      "recli",
+      "sith",
+      "test_translator",
+      "textdrop",
+      "trajectory_api",
+      "xjq"
+    ],
+    "v2_triage_eligible_tasks_after_recovery": 24,
+    "max_calls_per_task": 2,
+    "maximum_generation_calls": 48,
+    "max_candidate_files_per_call": 4,
+    "max_candidate_files_per_task": 8,
+    "maximum_candidate_files": 192,
+    "no_eligible_hint_policy": "No MG call; keep the task in the cohort and report the unused opportunity.",
+    "retry_policy": "No retry after a model attempt, completed response, empty response, or invalid response."
+  },
+  "evaluation": {
+    "candidate_review": "Review only v2 Mutation-Guided candidates with the frozen method-blind C1 specification review; no Vanilla/Original candidates are reviewed.",
+    "source_validation": "Require C1 correctness, three stable source runs, and three target-mutant-kill runs for every retained MG candidate.",
+    "later_checkpoint_scope": "Evaluate only frozen MG composite suites (base tests + immutable v1 retained MG tests + retained v2 MG tests), across all 36 trajectories and 160 later-checkpoint pairs.",
+    "reporting": "Report MG-only retained-test coverage and confirmed regression events. Do not make Original-vs-MG or Vanilla-vs-MG comparative claims from this amendment."
+  },
+  "result_root": "artifacts/results/rq1_recovery_v2"
+}

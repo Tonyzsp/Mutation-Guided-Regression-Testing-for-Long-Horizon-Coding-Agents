@@ -29,12 +29,53 @@ from run_vanilla_generation import (
 
 
 PROMPT_TEMPLATE = REPO_ROOT / "prompts" / "mutation_guided_v1.md"
+STUDY_BUDGET_CONFIG = REPO_ROOT / "config" / "rq1_full_study_budget_v1.json"
+STUDY_BUDGET_LOCK = REPO_ROOT / "config" / "rq1_full_study_budget_v1.lock.json"
 MAX_MUTANT_RECORD_BYTES = 8_000_000
-MUTANT_ID_RE = re.compile(r"[A-Za-z0-9_.:-]+")
+# mutmut's stable IDs may use the U+01C1 double-bar delimiter between
+# module/class/function components (for example ``mod.xǁClassǁmethod__mutmut_1``).
+MUTANT_ID_RE = re.compile(r"[A-Za-z0-9_.:\-\u01c1]+")
 
 
 def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def load_locked_study_budget(path: Path) -> tuple[dict[str, Any], str]:
+    resolved = path.resolve(strict=True)
+    actual_sha = sha256_bytes(resolved.read_bytes())
+    lock_path = resolved.with_name(f"{resolved.stem}.lock.json")
+    lock = read_json(lock_path)
+    if (
+        not resolved.is_relative_to(REPO_ROOT.resolve(strict=True))
+        or lock.get("budget_path") != resolved.relative_to(REPO_ROOT).as_posix()
+        or lock.get("sha256") != actual_sha
+    ):
+        raise ValueError("study-budget SHA-256 differs from its adjacent lock")
+    budget_config = read_json(resolved)
+    if budget_config.get("experiment_id") != lock.get("experiment_id"):
+        raise ValueError("study-budget experiment ID differs from its lock")
+    return budget_config, actual_sha
+
+
+def validate_paired_budget(generation_budget: dict[str, Any], study_budget: dict[str, Any]) -> None:
+    budget = generation_budget["budget"]
+    formal = study_budget["generation"]
+    model = generation_budget["model"]
+    expected = {
+        "max_calls": formal["max_calls_per_method_task"],
+        "max_candidates": formal["max_candidates_per_method_task"],
+        "per_call_output_tokens": formal["requested_output_tokens_per_call"],
+        "max_output_tokens": formal["requested_output_tokens_per_method_task"],
+    }
+    for name, value in expected.items():
+        if budget.get(name) != value:
+            raise ValueError(f"generation budget {name}={budget.get(name)!r} differs from frozen study value {value!r}")
+    if model.get("model_id") != formal["model"] or model.get("reasoning_effort") != formal["reasoning_effort"]:
+        raise ValueError("generation model/reasoning setting differs from the frozen full-study budget")
+    source_validation = study_budget["source_checkpoint_validation"]
+    if generation_budget.get("validation", {}).get("repeat_runs") != source_validation["candidate_plus_base_repeat_runs"]:
+        raise ValueError("C1 candidate repeat count differs from the frozen full-study budget")
 
 
 def safe_relative(value: str, field: str) -> PurePosixPath:
@@ -49,6 +90,9 @@ def load_eligible_mutants(
     package_root: Path,
     package: dict[str, Any],
     triage_path: Path | None = None,
+    max_hints: int = 16,
+    study_budget_sha256: str | None = None,
+    allow_untriaged: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any] | None]:
     allowed_results = (REPO_ROOT / "artifacts" / "results").resolve(strict=True)
     records_path = records_path.resolve(strict=True)
@@ -114,18 +158,20 @@ def load_eligible_mutants(
             "target_function_reached_in_baseline": record.get("target_function_reached_in_baseline"),
             "review_status": record.get("review_status", "not_reviewed"),
         })
-    if len(survivors) != summary.get("status_counts", {}).get("survived"):
+    if len(survivors) != summary.get("status_counts", {}).get("survived", 0):
         raise ValueError("eligible survivor count does not match the mutation summary")
 
     triage: dict[str, Any] | None = None
     if triage_path is None:
+        if not allow_untriaged:
+            raise ValueError("formal Mutation-Guided generation requires a hash-matched family-triage file")
         eligible = survivors
     else:
         triage_path = triage_path.resolve(strict=True)
         if not triage_path.is_relative_to(REPO_ROOT):
             raise ValueError(f"mutant triage must be under {REPO_ROOT}")
         triage = read_json(triage_path)
-        if triage.get("schema_version") != "rq1-mutant-triage/v1":
+        if triage.get("schema_version") != "rq1-mutant-triage/v2":
             raise ValueError("unsupported mutant-triage schema")
         if triage.get("task_id") != package["task_id"] or triage.get("checkpoint_id") != package["checkpoint_id"]:
             raise ValueError("mutant triage does not match the source checkpoint")
@@ -134,6 +180,35 @@ def load_eligible_mutants(
             raise ValueError("mutant triage belongs to a different trajectory")
         if triage.get("mutation_record_set_sha256") != sha256_bytes(records_path.read_bytes()):
             raise ValueError("mutant triage was prepared for a different mutation record set")
+        if study_budget_sha256 is not None and triage.get("study_budget_sha256") != study_budget_sha256:
+            raise ValueError("mutant triage uses a different full-study budget hash")
+        family_selection = triage.get("family_selection")
+        if not isinstance(family_selection, dict):
+            raise ValueError("mutant triage lacks frozen family-selection metadata")
+        representative_ids = family_selection.get("selected_representative_ids")
+        if not isinstance(representative_ids, list) or len(representative_ids) > max_hints or len(set(representative_ids)) != len(representative_ids):
+            raise ValueError(f"mutant triage representatives exceed the {max_hints}-hint cap or contain duplicates")
+        if family_selection.get("per_task_family_cap") != max_hints:
+            raise ValueError("mutant triage family cap differs from the frozen study budget")
+        selection_sidecar = triage_path.parent / "family_selection.json"
+        if not selection_sidecar.is_file():
+            raise ValueError("hash-linked family-selection sidecar is missing")
+        selection_manifest = read_json(selection_sidecar)
+        selection_payload = dict(selection_manifest)
+        selection_payload.pop("selection_manifest_sha256", None)
+        selection_payload.pop("selected_representatives", None)
+        selection_payload.pop("package_hashes", None)
+        recomputed_selection_sha = sha256_bytes(
+            (json.dumps(selection_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        )
+        if (
+            selection_manifest.get("selection_manifest_sha256") != family_selection.get("selection_manifest_sha256")
+            or selection_manifest.get("selection_manifest_sha256") != recomputed_selection_sha
+            or selection_manifest.get("mutation_record_set_sha256") != triage.get("mutation_record_set_sha256")
+            or selection_manifest.get("selected_representative_ids") != representative_ids
+            or [row.get("mutant_id") for row in selection_manifest.get("selected_representatives", [])] != representative_ids
+        ):
+            raise ValueError("family-selection sidecar does not match the triage file")
         decisions = triage.get("decisions")
         if not isinstance(decisions, list):
             raise ValueError("mutant triage decisions must be an array")
@@ -161,6 +236,8 @@ def load_eligible_mutants(
                 raise ValueError(f"duplicate mutant triage decision: {mutant_id}")
             decision_by_id[mutant_id] = decision
         survivor_ids = {item["mutant_id"] for item in survivors}
+        if not set(representative_ids).issubset(survivor_ids):
+            raise ValueError("family-selection sidecar contains a non-surviving mutant")
         if set(decision_by_id) != survivor_ids:
             missing = sorted(survivor_ids - set(decision_by_id))
             extra = sorted(set(decision_by_id) - survivor_ids)
@@ -168,7 +245,20 @@ def load_eligible_mutants(
         eligible = []
         for survivor in survivors:
             decision = decision_by_id[survivor["mutant_id"]]
-            if decision["status"] == "eligible" and decision.get("selected_for_generation", True):
+            selected = decision.get("selected_for_generation")
+            if not isinstance(selected, bool):
+                raise ValueError(f"mutant triage has no boolean selected_for_generation for {survivor['mutant_id']}")
+            if selected and survivor["mutant_id"] not in representative_ids:
+                raise ValueError(f"non-representative survivor selected for generation: {survivor['mutant_id']}")
+            if selected and decision["status"] != "eligible":
+                raise ValueError(f"non-eligible survivor selected for generation: {survivor['mutant_id']}")
+            if decision["status"] == "eligible" and not selected and not decision.get("selection_rationale"):
+                raise ValueError(f"eligible but unselected mutant lacks a selection rationale: {survivor['mutant_id']}")
+            if decision["status"] == "eligible" and any(not isinstance(decision.get(field), str) or not decision[field].strip() for field in (
+                "specification_reference", "observable_behavior", "trigger", "expected_result"
+            )):
+                raise ValueError(f"eligible mutant triage lacks a specified observable oracle: {survivor['mutant_id']}")
+            if decision["status"] == "eligible" and selected:
                 eligible.append({
                     **survivor,
                     "triage_status": decision["status"],
@@ -177,6 +267,8 @@ def load_eligible_mutants(
                     "behavior_family_id": decision.get("behavior_family_id"),
                     "selection_rationale": decision.get("selection_rationale"),
                 })
+        if len(eligible) > max_hints:
+            raise ValueError(f"Guided hint count {len(eligible)} exceeds the frozen {max_hints}-hint cap")
     return eligible, summary, triage
 
 
@@ -187,6 +279,12 @@ def main() -> int:
     parser.add_argument("--mutant-triage", type=Path, help="Audited decisions for every survivor; raw records remain unchanged")
     parser.add_argument("--output-dir", type=Path, required=True, help="New result directory under artifacts/results")
     parser.add_argument("--budget-config", type=Path, default=BUDGET_CONFIG)
+    parser.add_argument("--study-budget-config", type=Path, default=STUDY_BUDGET_CONFIG)
+    parser.add_argument(
+        "--allow-untriaged-survivors",
+        action="store_true",
+        help="Exploratory-only override; bypasses the formal 16-hint family-selection gate.",
+    )
     parser.add_argument("--prompt-template", type=Path, default=PROMPT_TEMPLATE)
     parser.add_argument("--opportunity-brief", type=Path)
     parser.add_argument("--output-schema", type=Path)
@@ -222,8 +320,18 @@ def main() -> int:
     package = read_json(package_root / "package.json")
     if package["task_id"] != package_root.parent.name or package["checkpoint_id"] != package_root.name:
         raise ValueError("package path does not match its task/checkpoint identifiers")
+    budget_config = read_json(args.budget_config)
+    study_budget, study_budget_sha = load_locked_study_budget(args.study_budget_config)
+    validate_paired_budget(budget_config, study_budget)
+    hint_cap = int(study_budget["mutant_hint_selection"]["guided_max_hints_per_task"])
     eligible_mutants, mutation_summary, triage = load_eligible_mutants(
-        args.mutant_records, package_root, package, args.mutant_triage
+        args.mutant_records,
+        package_root,
+        package,
+        args.mutant_triage,
+        max_hints=hint_cap,
+        study_budget_sha256=study_budget_sha,
+        allow_untriaged=args.allow_untriaged_survivors,
     )
     if args.pairwise_minimal_guidance:
         if len(eligible_mutants) != 1:
@@ -231,7 +339,6 @@ def main() -> int:
         eligible_mutants = [
             {"mutant_id": eligible_mutants[0]["mutant_id"], "diff": eligible_mutants[0]["diff"]}
         ]
-    budget_config = read_json(args.budget_config)
     configured_schema = budget_config.get("output_schema")
     output_schema_path = args.output_schema or (REPO_ROOT / configured_schema if configured_schema else OUTPUT_SCHEMA)
     budget = budget_config["budget"]
@@ -257,10 +364,15 @@ def main() -> int:
         prompt_budget,
         template_path=template_path,
         extra_template_values=extra_template_values,
+        input_consumer="mutation_guided_generation",
     )
     input_manifest["prompt_template"] = prompt_resource(template_path, "prompt template")
     input_manifest["output_schema"] = prompt_resource(output_schema_path.resolve(strict=True), "output schema")
     input_manifest["budget_config"] = prompt_resource(args.budget_config.resolve(strict=True), "budget configuration")
+    input_manifest["study_budget_config"] = prompt_resource(args.study_budget_config.resolve(strict=True), "full-study budget configuration")
+    input_manifest["study_budget_id"] = study_budget["experiment_id"]
+    input_manifest["study_budget_sha256"] = study_budget_sha
+    input_manifest["formal_eligibility"] = triage is not None and not args.allow_untriaged_survivors
     input_manifest["budget_id"] = budget_config["budget_id"]
     if args.opportunity_brief:
         input_manifest["opportunity_brief"] = prompt_resource(args.opportunity_brief, "opportunity brief")
@@ -279,6 +391,7 @@ def main() -> int:
         "eligible_mutants_sha256": sha256_bytes(eligible_bytes),
         "eligible_mutant_count": len(eligible_mutants),
         "eligible_mutant_ids": [item["mutant_id"] for item in eligible_mutants],
+        "guided_hint_cap": hint_cap,
     })
     triage_copy_name = None
     triage_copy_bytes = None
@@ -355,6 +468,9 @@ def main() -> int:
             "method": "mutation_guided",
             "model_config_id": budget_config["model"]["model_config_id"],
             "budget_id": budget_config["budget_id"],
+            "study_budget_id": study_budget["experiment_id"],
+            "study_budget_sha256": study_budget_sha,
+            "formal_eligibility": input_manifest["formal_eligibility"],
             "prompt_template_version": budget_config.get("prompt_template_version", "mutation_guided_v1"),
             "input_manifest_path": "input_manifest.json",
             "prompt_archive_path": "prompt_archive.md",
@@ -367,6 +483,7 @@ def main() -> int:
                 "max_calls": budget["max_calls"],
                 "max_output_tokens": budget["max_output_tokens"],
                 "max_candidates": budget["max_candidates"],
+                "max_guided_hints": hint_cap,
             },
             "actual_usage": {
                 "calls": 0,
@@ -543,6 +660,9 @@ def main() -> int:
         "method": "mutation_guided",
         "model_config_id": budget_config["model"]["model_config_id"],
         "budget_id": budget_config["budget_id"],
+        "study_budget_id": study_budget["experiment_id"],
+        "study_budget_sha256": study_budget_sha,
+        "formal_eligibility": input_manifest["formal_eligibility"],
         "prompt_template_version": budget_config.get("prompt_template_version", "mutation_guided_v1"),
         "input_manifest_path": "input_manifest.json",
         "prompt_archive_path": "prompt_archive.md",
@@ -561,6 +681,7 @@ def main() -> int:
             "max_calls": budget["max_calls"],
             "max_output_tokens": budget["max_output_tokens"],
             "max_candidates": budget["max_candidates"],
+            "max_guided_hints": hint_cap,
         },
         "actual_usage": {
             "calls": len(call_records),

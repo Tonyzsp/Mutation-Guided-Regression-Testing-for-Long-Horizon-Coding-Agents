@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -31,16 +32,20 @@ def main() -> int:
     parser.add_argument("--budget-config", type=Path, default=BUDGET_PATH)
     parser.add_argument("--study-budget-config", type=Path, default=STUDY_BUDGET_PATH)
     parser.add_argument("--prompt-template", type=Path, default=PROMPT_PATH)
-    parser.add_argument("--output-suffix", default="vanilla_formal_v5_20261116")
-    parser.add_argument("--task", action="append", help="Limit to task IDs; may be repeated.")
+    parser.add_argument("--output-suffix", default="vanilla_formal_v1_20261117")
+    parser.add_argument("--task", action="append", help="Limit this run to task IDs; may be repeated")
     args = parser.parse_args()
 
     all_units = read_json(args.units.resolve(strict=True))["units"]
-    unknown_tasks = sorted(set(args.task or []) - {unit["task_id"] for unit in all_units})
+    known_tasks = {unit["task_id"] for unit in all_units}
+    unknown_tasks = sorted(set(args.task or []) - known_tasks)
     if unknown_tasks:
-        raise ValueError(f"unknown task ID(s): {unknown_tasks}")
+        raise ValueError(f"unknown task IDs: {unknown_tasks}")
     units = [unit for unit in all_units if not args.task or unit["task_id"] in args.task]
+    if not units:
+        raise ValueError("no C1 units selected")
     budget_id = read_json(args.budget_config.resolve(strict=True))["budget_id"]
+    study_budget_sha = hashlib.sha256(args.study_budget_config.resolve(strict=True).read_bytes()).hexdigest()
     batch_dir = RESULTS_ROOT / f"cohort_logs_{args.output_suffix}"
     batch_dir.mkdir(parents=True, exist_ok=True)
     batch_log = batch_dir / "cohort_generation.jsonl"
@@ -56,7 +61,7 @@ def main() -> int:
         task_id = unit["task_id"]
         package = PACKAGE_ROOT / task_id / "C1"
         generation_dir = RESULTS_ROOT / task_id / "C1" / args.output_suffix
-        brief = RESULTS_ROOT / task_id / "C1" / "gap_opportunities_isolation_revalidated_v3.md"
+        brief = RESULTS_ROOT / task_id / "C1" / "formal_v1_inputs_20261117" / "gap_opportunities.md"
         run_path = generation_dir / "generation_run.json"
         prior_records = prior.get(task_id, [])
         current_generation_dir = generation_dir.resolve()
@@ -71,6 +76,7 @@ def main() -> int:
             existing is not None
             and existing.get("codex_exit_code") == 0
             and existing.get("prompt_template_version") == "c1_shared_gap_v4_cohort_v1"
+            and existing.get("study_budget_sha256") == study_budget_sha
             and (generation_dir / "candidate_response.json").is_file()
             and (generation_dir / "input_manifest.json").is_file()
             and (generation_dir / "prompt_archive.md").is_file()
@@ -129,6 +135,7 @@ def main() -> int:
             "exit_code": return_code,
             "generation_dir": str(generation_dir),
             "budget_id": budget_id,
+            "study_budget_sha256": study_budget_sha,
             "finished_at_utc": datetime.now(timezone.utc).isoformat(),
             "stdout": output,
             "stderr": error,

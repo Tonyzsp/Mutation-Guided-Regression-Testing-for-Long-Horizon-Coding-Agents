@@ -23,7 +23,7 @@ REVIEWER = ROOT / "scripts" / "review_generated_candidates.py"
 PREPARE_RUNTIME = ROOT / "scripts" / "prepare_checkpoint_runtime.py"
 BUDGET_PATH = ROOT / "config" / "generation_budget_rq1_c1_cohort_formal.json"
 STUDY_BUDGET_PATH = ROOT / "config" / "rq1_full_study_budget_v1.json"
-DEFAULT_SUFFIX = "vanilla_formal_v5_20261116"
+DEFAULT_SUFFIX = "vanilla_formal_v1_20261117"
 
 
 def write_jsonl(path: Path, row: dict[str, Any]) -> None:
@@ -59,6 +59,7 @@ def prepare_local_runtime(task: str) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-suffix", default=DEFAULT_SUFFIX)
+    parser.add_argument("--baseline-audit", type=Path, default=AUDIT_PATH)
     parser.add_argument(
         "--cohort-log-name",
         help="Optional JSONL filename under the result root; useful when independent task batches run concurrently.",
@@ -66,14 +67,24 @@ def main() -> int:
     parser.add_argument("--task", action="append", help="Limit to task IDs; may be repeated")
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--review-timeout-seconds", type=int, default=900)
-    parser.add_argument("--baseline-audit", type=Path, default=AUDIT_PATH)
     parser.add_argument("--budget-config", type=Path, default=BUDGET_PATH)
     parser.add_argument("--study-budget-config", type=Path, default=STUDY_BUDGET_PATH)
     args = parser.parse_args()
 
     units = read_json(UNITS_PATH)["units"]
-    audit_path = args.baseline_audit.resolve(strict=True)
-    baseline = read_json(audit_path)
+    study_budget_path = args.study_budget_config.resolve(strict=True)
+    study_budget_sha = sha256_file(study_budget_path)
+    study_budget_lock_path = study_budget_path.with_name(f"{study_budget_path.stem}.lock.json")
+    study_budget_lock = read_json(study_budget_lock_path)
+    if (
+        study_budget_lock.get("sha256") != study_budget_sha
+        or study_budget_lock.get("budget_path") != study_budget_path.relative_to(ROOT).as_posix()
+    ):
+        raise ValueError("study-budget lock does not match the full-study configuration")
+    if study_budget_lock.get("experiment_id") != read_json(study_budget_path).get("experiment_id"):
+        raise ValueError("study-budget experiment ID differs from its lock")
+    baseline_path = args.baseline_audit.resolve(strict=True)
+    baseline = read_json(baseline_path)
     baseline_by_task = {row["task_id"]: row for row in baseline["records"]}
     expected_prompt = {
         "path": "prompts/vanilla_gap_v4.md",
@@ -118,8 +129,10 @@ def main() -> int:
             input_manifest = read_json(generation_dir / "input_manifest.json")
             response = read_json(generation_dir / "candidate_response.json")
             baseline_record = baseline_by_task[task]
-            if generation.get("codex_exit_code") != 0:
+            if generation.get("codex_exit_code") != 0 or generation.get("formal_eligibility") is not True:
                 raise ValueError("generation run did not complete successfully")
+            if generation.get("study_budget_sha256") != study_budget_sha:
+                raise ValueError("generation run does not match the locked full-study budget")
             if generation.get("prompt_template_version") != "c1_shared_gap_v4_cohort_v1":
                 raise ValueError("generation run did not use the shared v4 prompt")
             if generation.get("budget_id") != "rq1-c1-cohort-gpt6-luna-medium-3calls-12288out-8candidates-repeat3-v1":
@@ -134,9 +147,8 @@ def main() -> int:
                 raise ValueError("baseline audit base-test hash differs from the sanitized C1 package")
             if len(response.get("tests", [])) != generation.get("candidate_count"):
                 raise ValueError("candidate response and generation-run counts differ")
-
-            if input_manifest.get("study_budget_config") != expected_study_budget:
-                raise ValueError("generation input manifest does not identify the current full-study budget")
+            if input_manifest.get("workspace_revision") != package.get("workspace_revision"):
+                raise ValueError("generator workspace revision differs from the sanitized C1 package")
 
             review_path = generation_dir / "correctness_review.json"
             review_run_path = generation_dir / "correctness_review_run.json"
@@ -171,6 +183,18 @@ def main() -> int:
                     raise ValueError("candidate correctness review is incomplete or used the wrong model configuration")
             elif review_run.get("status") != "not_needed_no_candidates":
                 raise ValueError("empty candidate response must record a zero-call correctness review")
+            if input_manifest.get("study_budget_config") != expected_study_budget:
+                raise ValueError("generation input manifest does not identify the current full-study budget")
+            if review_run.get("study_budget_sha256") != study_budget_sha:
+                raise ValueError("candidate review does not match the locked full-study budget")
+            if review_run.get("candidate_count") != generation.get("candidate_count"):
+                raise ValueError("candidate review count differs from the Vanilla response")
+            if review_run.get("status") not in {"complete", "not_needed_no_candidates"}:
+                raise ValueError(f"candidate review is not complete: {review_run.get('status')}")
+            if review_run.get("base_tests_sha256") != package.get("base_tests_sha256"):
+                raise ValueError("candidate review base-test hash differs from the sanitized C1 package")
+            if review_run.get("excluded_model_inputs", []) != input_manifest.get("excluded_model_inputs", []):
+                raise ValueError("candidate review and generation used different model-input exclusions")
 
             frozen_path = generation_dir / "frozen_test_suite.json"
             if frozen_path.is_file():
@@ -179,7 +203,7 @@ def main() -> int:
                     frozen.get("method") == "vanilla_llm"
                     and frozen.get("task_id") == task
                     and frozen.get("source_checkpoint") == "C1"
-                    and frozen.get("metadata", {}).get("baseline_audit_sha256") == sha256_file(audit_path)
+                    and frozen.get("metadata", {}).get("baseline_audit_sha256") == sha256_file(baseline_path)
                 ):
                     row["status"] = "already_frozen"
                     row["suite_sha256"] = frozen.get("suite_sha256")
@@ -202,7 +226,7 @@ def main() -> int:
                     "--timeout-seconds",
                     str(args.timeout_seconds),
                     "--baseline-audit",
-                    str(audit_path),
+                    str(baseline_path),
                 ]
                 result = subprocess.run(
                     command,
@@ -222,7 +246,7 @@ def main() -> int:
                 row["suite_sha256"] = frozen.get("suite_sha256")
             row["candidate_count"] = generation.get("candidate_count")
             row["retained_count"] = read_json(generation_dir / "generation_run.json").get("retained_count")
-            row["baseline_audit_sha256"] = sha256_file(audit_path)
+            row["baseline_audit_sha256"] = sha256_file(baseline_path)
             row["generation_run_sha256"] = sha256_file(generation_dir / "generation_run.json")
             print(f"[{index}/{len(selected)}] {task}: {row['status']}", flush=True)
         except Exception as error:

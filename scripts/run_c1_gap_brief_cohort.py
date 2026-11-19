@@ -17,8 +17,9 @@ RESULT_ROOT = ROOT / "artifacts" / "results" / "rq1_full_36x1"
 PACKAGE_ROOT = ROOT / "data" / "checkpoints" / "checkpoint_packages_rq1_full_36x1"
 UNITS_PATH = ROOT / "config" / "rq1_full_36x1_candidate_units.json"
 BUILDER = ROOT / "scripts" / "build_c1_gap_brief.py"
-BRIEF_SUFFIX = "gap_opportunities_isolation_revalidated_v3.md"
-OUTPUT = RESULT_ROOT / "c1_gap_brief_cohort_isolation_revalidated_20261019.json"
+BRIEF_SUBDIR = "formal_v1_inputs_20261117"
+BRIEF_FILENAME = "gap_opportunities.md"
+OUTPUT = RESULT_ROOT / "c1_gap_brief_cohort_formal_v1_20261117.json"
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -36,7 +37,10 @@ def sha256_file(path: Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", action="append", help="Limit to task IDs; may be repeated")
+    parser.add_argument("--output-subdir", default=BRIEF_SUBDIR, help="New per-task input directory beneath each C1 result folder")
     args = parser.parse_args()
+    if Path(args.output_subdir).name != args.output_subdir or args.output_subdir in {".", ".."}:
+        raise ValueError("output subdirectory must be one path component")
     units_manifest = read_json(UNITS_PATH)
     units = units_manifest["units"]
     selected = [unit for unit in units if not args.task or unit["task_id"] in args.task]
@@ -50,7 +54,7 @@ def main() -> int:
     for index, unit in enumerate(selected, 1):
         task = unit["task_id"]
         package = PACKAGE_ROOT / task / "C1"
-        brief = RESULT_ROOT / task / "C1" / BRIEF_SUFFIX
+        brief = RESULT_ROOT / task / "C1" / args.output_subdir / BRIEF_FILENAME
         manifest_path = brief.with_name("opportunity_brief_manifest.json")
         status = "failed"
         error = ""
@@ -112,7 +116,7 @@ def main() -> int:
         "candidate_units_sha256": sha256_file(UNITS_PATH),
         "records": records,
     }
-    output = OUTPUT if not args.task else OUTPUT.with_name("c1_gap_brief_cohort_selected_20261019.json")
+    output = OUTPUT if not args.task else OUTPUT.with_name("c1_gap_brief_cohort_selected_formal_v1_20261117.json")
     output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(json.dumps({"status": report["status"], "task_count": len(selected), "completed_count": complete, "output": str(output)}, ensure_ascii=False))
     return 0 if report["status"] == "complete" else 1

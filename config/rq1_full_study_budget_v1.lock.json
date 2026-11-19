@@ -1,0 +1,7 @@
+{
+  "format": "rq1-study-budget-lock/v1",
+  "experiment_id": "rq1_full_36x1_formal_v1",
+  "budget_path": "config/rq1_full_study_budget_v1.json",
+  "sha256": "7ca6f4be4a59b895feeb40eb6c1ad85b2dee61e199b9e69816ba0e0a6eeb3063",
+  "change_policy": "A budget change requires a new protocol version and run ID."
+}

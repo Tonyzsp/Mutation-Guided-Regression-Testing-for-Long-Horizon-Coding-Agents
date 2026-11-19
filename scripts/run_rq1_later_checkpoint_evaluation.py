@@ -7,6 +7,7 @@ import difflib
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -16,14 +17,20 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from validate_and_freeze_tests import filesystem_path, hash_tree as frozen_suite_hash
+from validate_checkpoint_package import sha256_tree as package_tree_hash
+
 ROOT = Path(__file__).resolve().parents[1]
 RESULT_ROOT = ROOT / "artifacts" / "results" / "rq1_full_36x1"
+V2_RESULT_ROOT = ROOT / "artifacts" / "results" / "rq1_recovery_v2"
+RESULTS_ROOT = ROOT / "artifacts" / "results"
 PACKAGE_ROOT = ROOT / "data" / "checkpoints" / "checkpoint_packages_rq1_full_36x1"
 UNIT_PATH = ROOT / "config" / "rq1_full_36x1_candidate_units.json"
-BASELINE_PATH = RESULT_ROOT / "c1_base_audit_isolation_revalidated_20261019" / "c1_base_suite_audit.json"
+BASELINE_PATH = RESULT_ROOT / "c1_base_audit_current_sanitized_20261116" / "c1_base_suite_audit.json"
 PREPARE_SCRIPT = ROOT / "scripts" / "prepare_checkpoint_runtime.py"
-VANILLA_AUDIT_PATH = RESULT_ROOT / "c1_vanilla_cohort_audit_20261019.json"
-DEFAULT_GUIDED = "guided_iso_v3_20261019"
+VANILLA_AUDIT_PATH = RESULT_ROOT / "vanilla_formal_v1_cohort_audit_20261117.json"
+DEFAULT_VANILLA = "vanilla_formal_v1_20261117"
+DEFAULT_GUIDED = "mutation_guided_formal_v1_baseline_linked_20261117"
 CONTAINER_WORKSPACE = "/workspace"
 REPORT_PATH = "/workspace/rq1-evaluation-report.json"
 METHODS = ("original", "vanilla_llm", "mutation_guided")
@@ -31,13 +38,42 @@ REPRODUCIBILITY_REPEATS = 3
 
 
 def read_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    with open(filesystem_path(path), "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+_TARGET_SYNTAX_ERROR = re.compile(r"\b(?:SyntaxError|IndentationError|TabError)\b")
+_TARGET_WORKSPACE_FILE = re.compile(r"File\s+['\"]\/workspace\/(?!base_tests\/)[^'\"]+\.py['\"]")
+
+
+def is_target_syntax_regression(test: dict[str, Any]) -> bool:
+    """Recognize a test setup error caused by invalid Python in the checkpoint code."""
+    detail = str(test.get("longrepr") or "")
+    return bool(_TARGET_SYNTAX_ERROR.search(detail) and _TARGET_WORKSPACE_FILE.search(detail))
+
+
+def pytest_test_detail(item: dict[str, Any]) -> str | None:
+    detail = item.get("longrepr")
+    if detail:
+        return str(detail)
+    phase_messages = [
+        str(item[phase].get("crash", {}).get("message"))
+        for phase in ("setup", "call", "teardown")
+        if isinstance(item.get(phase), dict)
+        and item[phase].get("crash", {}).get("message")
+    ]
+    return "\n".join(phase_messages) if phase_messages else None
 
 
 def vanilla_cohort_suffix(task: str) -> str:
     audit = read_json(VANILLA_AUDIT_PATH)
     if audit.get("status") != "complete":
         raise ValueError("the sanitized 36-task Vanilla cohort audit is incomplete")
+    if audit.get("format") == "rq1-vanilla-formal-v1-cohort-audit/v1":
+        matches = [row for row in audit.get("tasks", []) if row.get("task_id") == task and row.get("status") == "frozen"]
+        if len(matches) != 1:
+            raise ValueError(f"{task}: no unique audited formal Vanilla suite")
+        return DEFAULT_VANILLA
     matches = [row for row in audit.get("records", []) if row.get("task_id") == task and row.get("status") == "complete"]
     if len(matches) != 1:
         raise ValueError(f"{task}: no unique audited Vanilla suite directory")
@@ -63,13 +99,8 @@ def sha256_file(path: Path) -> str:
 
 
 def hash_tree(root: Path) -> str:
-    digest = hashlib.sha256()
-    for path in sorted(item for item in root.rglob("*") if item.is_file()):
-        relative = path.relative_to(root).as_posix().encode("utf-8")
-        digest.update(len(relative).to_bytes(8, "big"))
-        digest.update(relative)
-        digest.update(path.read_bytes())
-    return digest.hexdigest()
+    """Use the checkpoint-package tree hash for suite overlays and base-test checks."""
+    return package_tree_hash(root)
 
 
 def snapshot_files(root: Path) -> dict[str, bytes]:
@@ -198,7 +229,12 @@ def package_file(package: dict[str, Any], package_root: Path, key: str) -> Path:
     return path
 
 
-def source_suite(task: str, method: str, guided_suffix: str) -> tuple[Path, list[str], str, str | None]:
+def source_suite(
+    task: str,
+    method: str,
+    guided_suffix: str,
+    guided_root: Path = RESULT_ROOT,
+) -> tuple[Path, list[str], str, str | None]:
     package_root = (PACKAGE_ROOT / task / "C1").resolve(strict=True)
     package = read_json(package_root / "package.json")
     if method == "original":
@@ -206,23 +242,32 @@ def source_suite(task: str, method: str, guided_suffix: str) -> tuple[Path, list
         return base, [], hash_tree(base), None
 
     suffix = vanilla_cohort_suffix(task) if method == "vanilla_llm" else guided_suffix
-    generation_dir = RESULT_ROOT / task / "C1" / suffix
+    generation_root = RESULT_ROOT if method == "vanilla_llm" else guided_root
+    generation_dir = generation_root / task / "C1" / suffix
     frozen_path = generation_dir / "frozen_test_suite.json"
-    if not frozen_path.is_file():
+    if not os.path.isfile(filesystem_path(frozen_path)):
         raise FileNotFoundError(f"{method} suite is not frozen: {frozen_path}")
     frozen = read_json(frozen_path)
     expected_method = method
     if frozen.get("task_id") != task or frozen.get("source_checkpoint") != "C1" or frozen.get("method") != expected_method:
         raise ValueError(f"frozen suite identity mismatch for {task}/{method}")
-    suite_root = (generation_dir / frozen["suite_path"]).resolve(strict=True)
-    base = (generation_dir / frozen["base_suite_path"]).resolve(strict=True)
-    if not base.is_relative_to(suite_root) or not base.is_dir():
+    suite_relative = PurePosixPath(frozen["suite_path"])
+    base_relative = PurePosixPath(frozen["base_suite_path"])
+    for label, relative in (("suite_path", suite_relative), ("base_suite_path", base_relative)):
+        if relative.is_absolute() or ".." in relative.parts or "\\" in frozen[label]:
+            raise ValueError(f"unsafe frozen {label}: {frozen[label]!r}")
+    if base_relative.parts[: len(suite_relative.parts)] != suite_relative.parts:
+        raise ValueError(f"invalid frozen base suite path: {frozen['base_suite_path']}")
+    suite_root = generation_dir.joinpath(*suite_relative.parts)
+    base = generation_dir.joinpath(*base_relative.parts)
+    if not os.path.isdir(filesystem_path(base)):
         raise ValueError(f"invalid frozen base suite path: {base}")
     generated = list(frozen.get("generated_test_paths", []))
-    if hash_tree(suite_root) != frozen.get("suite_sha256"):
+    if frozen_suite_hash(suite_root) != frozen.get("suite_sha256"):
         raise ValueError(f"frozen suite hash mismatch for {task}/{method}")
     validation_path = generation_dir / frozen["validation_log_path"]
-    validation_rows = [json.loads(line) for line in validation_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    with open(filesystem_path(validation_path), "r", encoding="utf-8") as handle:
+        validation_rows = [json.loads(line) for line in handle if line.strip()]
     retained_ids = [
         str(nodeid)
         for record in validation_rows if record.get("status") == "retained"
@@ -231,12 +276,19 @@ def source_suite(task: str, method: str, guided_suffix: str) -> tuple[Path, list
     return base, generated, frozen["suite_sha256"], str(generation_dir)
 
 
-def eligible_source_ids(task: str, method: str, baseline: dict[str, Any], guided_suffix: str) -> set[str]:
+def eligible_source_ids(
+    task: str,
+    method: str,
+    baseline: dict[str, Any],
+    guided_suffix: str,
+    guided_root: Path = RESULT_ROOT,
+) -> set[str]:
     ids = set(baseline.get("stable_pass_test_ids", []))
     if method == "original":
         return ids
     suffix = vanilla_cohort_suffix(task) if method == "vanilla_llm" else guided_suffix
-    generation_dir = RESULT_ROOT / task / "C1" / suffix
+    generation_root = RESULT_ROOT if method == "vanilla_llm" else guided_root
+    generation_dir = generation_root / task / "C1" / suffix
     frozen = read_json(generation_dir / "frozen_test_suite.json")
     validation_path = generation_dir / frozen["validation_log_path"]
     for line in validation_path.read_text(encoding="utf-8").splitlines():
@@ -248,30 +300,40 @@ def eligible_source_ids(task: str, method: str, baseline: dict[str, Any], guided
     return ids
 
 
-def materialize_suite_overlay(task: str, method: str, guided_suffix: str, run_stamp: str) -> tuple[Path, str, set[str], dict[str, Any]]:
+def materialize_suite_overlay(
+    task: str,
+    method: str,
+    guided_suffix: str,
+    run_stamp: str,
+    guided_root: Path = RESULT_ROOT,
+) -> tuple[Path, str, set[str], dict[str, Any]]:
     package_root = (PACKAGE_ROOT / task / "C1").resolve(strict=True)
     package = read_json(package_root / "package.json")
-    source_base, generated_paths, _declared_hash, generation_dir_text = source_suite(task, method, guided_suffix)
+    source_base, generated_paths, _declared_hash, generation_dir_text = source_suite(
+        task, method, guided_suffix, guided_root
+    )
     suite_root = ROOT / "tmp" / "rq1-evaluation-suites" / task / f"{method}-{run_stamp}"
     base_destination = suite_root / "base_tests"
     suite_root.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source_base, base_destination)
+    shutil.copytree(filesystem_path(source_base), filesystem_path(base_destination))
     if method != "original":
         generation_dir = Path(generation_dir_text)
         frozen = read_json(generation_dir / "frozen_test_suite.json")
-        frozen_root = generation_dir / frozen["suite_path"]
+        frozen_root = PurePosixPath(frozen["suite_path"])
         for relative in generated_paths:
             pure = PurePosixPath(relative)
             if pure.is_absolute() or ".." in pure.parts or "\\" in relative:
                 raise ValueError(f"unsafe frozen generated test path: {relative!r}")
-            source = (generation_dir / relative).resolve(strict=True)
-            if not source.is_relative_to(frozen_root.resolve(strict=True)) or not source.is_file():
+            if pure.parts[: len(frozen_root.parts)] != frozen_root.parts:
+                raise ValueError(f"generated test escaped frozen suite: {relative!r}")
+            source = generation_dir.joinpath(*pure.parts)
+            if not os.path.isfile(filesystem_path(source)):
                 raise ValueError(f"generated test escaped frozen suite: {relative!r}")
             filename = pure.name
             destination = base_destination / filename
-            if destination.exists():
+            if os.path.exists(filesystem_path(destination)):
                 raise ValueError(f"generated test collides with base test: {filename}")
-            shutil.copy2(source, destination)
+            shutil.copy2(filesystem_path(source), filesystem_path(destination))
     actual_hash = hash_tree(base_destination)
     if method == "original" and actual_hash != package.get("base_tests_sha256"):
         raise ValueError(f"Original suite copy hash mismatch for {task}")
@@ -315,6 +377,15 @@ def evaluation_command(
         target = str(mount["target"])
         if not target.startswith(CONTAINER_WORKSPACE.rstrip("/") + "/"):
             raise ValueError(f"asset mount escapes workspace: {target}")
+        base_tests_target = PurePosixPath(f"{CONTAINER_WORKSPACE}/base_tests")
+        target_path = PurePosixPath(target)
+        if target_path.parts[: len(base_tests_target.parts)] == base_tests_target.parts:
+            relative_target = target_path.parts[len(base_tests_target.parts):]
+            if not relative_target or ".." in relative_target:
+                raise ValueError(f"invalid asset mount target under base tests: {target}")
+            # Docker cannot create a nested mount point beneath a read-only bind mount.
+            # Create the empty mount-point directory in the disposable suite overlay first.
+            (suite_dir.joinpath(*relative_target)).mkdir(parents=True, exist_ok=True)
         command.extend(["--mount", f"type=bind,source={mount['source']},target={target},readonly"])
 
     pytest_command = list(runtime["test_command_argv"])
@@ -324,7 +395,17 @@ def evaluation_command(
         raise ValueError("target command does not invoke pytest") from error
     report_args = ["-p", "no:cacheprovider", "--json-report", f"--json-report-file={REPORT_PATH}"]
     if test_nodeids:
-        pytest_command = pytest_command[:pytest_index + 1] + ["-q", *report_args, *test_nodeids]
+        preserved_args: list[str] = []
+        replaced_suite_path = False
+        for argument in pytest_command[pytest_index + 1:]:
+            if argument in {"base_tests", f"{CONTAINER_WORKSPACE}/base_tests"}:
+                preserved_args.extend(test_nodeids)
+                replaced_suite_path = True
+            else:
+                preserved_args.append(argument)
+        if not replaced_suite_path:
+            preserved_args.extend(test_nodeids)
+        pytest_command = pytest_command[:pytest_index + 1] + ["-q", *report_args, *preserved_args]
     else:
         pytest_command[pytest_index + 1:pytest_index + 1] = report_args
     shell_commands = [shlex.join(list(item)) for item in runtime.get("container_setup_commands", [])]
@@ -366,7 +447,11 @@ def run_suite(
         try:
             raw = read_json(report)
             tests = [
-                {"nodeid": str(item["nodeid"]), "outcome": str(item["outcome"]), "longrepr": item.get("longrepr")}
+                {
+                    "nodeid": str(item["nodeid"]),
+                    "outcome": str(item["outcome"]),
+                    "longrepr": pytest_test_detail(item),
+                }
                 for item in raw.get("tests", []) if "nodeid" in item and "outcome" in item
             ]
         except (OSError, KeyError, json.JSONDecodeError) as error:
@@ -388,38 +473,61 @@ def run_suite(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task", action="append", help="Limit to task IDs; may be repeated")
+    parser.add_argument(
+        "--method",
+        action="append",
+        choices=METHODS,
+        help="Evaluate only the selected method(s); may be repeated. Defaults to all three.",
+    )
     parser.add_argument("--guided-suffix", default=DEFAULT_GUIDED)
+    parser.add_argument(
+        "--guided-root", type=Path, default=RESULT_ROOT,
+        help="Root containing task/C1/<guided-suffix>; use a separate root for recovery suites.",
+    )
     parser.add_argument("--problems-root", type=Path, default=ROOT / "external" / "scb-problems")
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--resume", action="store_true", help="Resume an incomplete evaluation output directory")
     args = parser.parse_args()
+    methods = tuple(dict.fromkeys(args.method or METHODS))
+    if args.guided_root.resolve() != RESULT_ROOT.resolve() and methods != ("mutation_guided",):
+        raise ValueError("a non-default guided root is supported only for MG-only evaluation")
+    args.guided_root = args.guided_root.resolve(strict=True)
 
     baseline_audit = read_json(BASELINE_PATH)
     baseline_by_task = {row["task_id"]: row for row in baseline_audit["records"]}
     units = read_json(UNIT_PATH)["units"]
+    if baseline_audit.get("status") != "complete" or len(baseline_by_task) != 36:
+        raise ValueError("current sanitized C1 baseline audit is incomplete")
+    for unit in units:
+        task = unit["task_id"]
+        package = read_json(PACKAGE_ROOT / task / "C1" / "package.json")
+        if baseline_by_task.get(task, {}).get("base_tests_sha256") != package.get("base_tests_sha256"):
+            raise ValueError(f"{task}: current C1 baseline does not match the sanitized package base tests")
     selected = [unit for unit in units if not args.task or unit["task_id"] in args.task]
     if not selected:
         raise ValueError("no RQ1 task units selected")
 
-    # Freeze gate: do not read target checkpoint files until every method is frozen on all C1 units.
+    # Freeze gate: do not read target checkpoint files until each selected method is frozen on every C1 unit.
     for unit in units:
         task = unit["task_id"]
-        for method in METHODS:
-            source_suite(task, method, args.guided_suffix)
+        for method in methods:
+            source_suite(task, method, args.guided_suffix, args.guided_root)
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output = args.output_dir.resolve() if args.output_dir else RESULT_ROOT / f"eval_{stamp}"
-    if not output.is_relative_to(RESULT_ROOT.resolve(strict=True)):
-        raise ValueError("evaluation output must remain beneath the RQ1 results root")
+    if not output.is_relative_to(RESULTS_ROOT.resolve(strict=True)):
+        raise ValueError("evaluation output must remain beneath the artifacts/results root")
     args.problems_root = args.problems_root.resolve(strict=True)
     config = {
         "task_ids": [unit["task_id"] for unit in selected],
+        "methods": list(methods),
         "guided_suffix": args.guided_suffix,
+        "guided_root": str(args.guided_root),
         "problems_root": str(args.problems_root),
         "timeout_seconds": args.timeout_seconds,
         "baseline_audit_sha256": sha256_file(BASELINE_PATH),
-        "method_suite_count": len(METHODS),
+        "method_suite_count": len(methods),
     }
     config_path = output / "evaluation_config.json"
     if output.exists():
@@ -427,8 +535,9 @@ def main() -> int:
             raise ValueError("evaluation output already exists; pass --resume for an incomplete matching run")
         if read_json(config_path) != config:
             raise ValueError("evaluation resume configuration differs from the saved run")
-        if (output / "evaluation_summary.json").is_file():
-            raise ValueError("evaluation output already has a final summary")
+        existing_summary_path = output / "evaluation_summary.json"
+        if existing_summary_path.is_file() and read_json(existing_summary_path).get("status") == "complete":
+            raise ValueError("evaluation output already has a complete final summary")
     else:
         if args.resume:
             raise FileNotFoundError("cannot resume: evaluation output directory does not exist")
@@ -443,6 +552,16 @@ def main() -> int:
     observations_by_id = {
         row["observation_id"]: row for row in read_jsonl(events_path)
     }
+
+    def needs_reproducibility_repair(task: str, checkpoint: str, suite_hash: str) -> bool:
+        return any(
+            row.get("task_id") == task
+            and row.get("target_checkpoint") == checkpoint
+            and row.get("suite_sha256") == suite_hash
+            and row.get("reproducibility", {}).get("status") == "infrastructure_error"
+            for row in observations_by_id.values()
+        )
+
     expected_run_keys: set[str] = set()
     args.stamp = stamp
 
@@ -451,10 +570,15 @@ def main() -> int:
         baseline = baseline_by_task[task]
         source_package_root = (PACKAGE_ROOT / task / "C1").resolve(strict=True)
         source_package = read_json(source_package_root / "package.json")
-        eligible_by_method = {method: eligible_source_ids(task, method, baseline, args.guided_suffix) for method in METHODS}
+        eligible_by_method = {
+            method: eligible_source_ids(task, method, baseline, args.guided_suffix, args.guided_root)
+            for method in methods
+        }
         suites: dict[str, dict[str, Any]] = {}
-        for method in METHODS:
-            suite_dir, suite_hash, _, _ = materialize_suite_overlay(task, method, args.guided_suffix, stamp)
+        for method in methods:
+            suite_dir, suite_hash, _, _ = materialize_suite_overlay(
+                task, method, args.guided_suffix, stamp, args.guided_root
+            )
             row = suites.setdefault(suite_hash, {"suite_dir": suite_dir, "methods": [], "eligible_test_ids": set()})
             row["methods"].append(method)
             row["eligible_test_ids"].update(eligible_by_method[method])
@@ -473,7 +597,11 @@ def main() -> int:
                 output,
             )
             suite_keys = [f"{task}|{checkpoint}|{suite_hash}" for suite_hash in suites]
-            if all(run_records_by_key.get(key, {}).get("status") == "complete" for key in suite_keys):
+            if all(
+                run_records_by_key.get(key, {}).get("status") == "complete"
+                and not needs_reproducibility_repair(task, checkpoint, key.rsplit("|", 1)[1])
+                for key in suite_keys
+            ):
                 print(f"  all {len(suites)} suites already complete; skipping", flush=True)
                 continue
             target_name = f"{checkpoint}-rq1-{stamp}-{task_index:02d}"
@@ -481,7 +609,8 @@ def main() -> int:
             runtime_dir, runtime = prepare_runtime(target_package, args.problems_root, target_stage_path)
             for suite_hash, suite in suites.items():
                 run_key = f"{task}|{checkpoint}|{suite_hash}"
-                if run_records_by_key.get(run_key, {}).get("status") == "complete":
+                repairing_reproductions = needs_reproducibility_repair(task, checkpoint, suite_hash)
+                if run_records_by_key.get(run_key, {}).get("status") == "complete" and not repairing_reproductions:
                     continue
                 run_dir = output / task / checkpoint / suite_hash[:12]
                 run_dir.mkdir(parents=True, exist_ok=True)
@@ -503,7 +632,11 @@ def main() -> int:
                     "stdout_path": "stdout.log",
                     "stderr_path": "stderr.log",
                 })
-                if result["status"] == "complete" and any(item["outcome"] == "error" for item in result["tests"]):
+                non_code_errors = [
+                    item for item in result["tests"]
+                    if item["outcome"] == "error" and not is_target_syntax_regression(item)
+                ]
+                if result["status"] == "complete" and non_code_errors:
                     persisted["status"] = "infrastructure_error"
                     persisted["report_error"] = "pytest reported test/setup errors; excluded from candidate-regression extraction"
                 if persisted["status"] != "complete":
@@ -522,8 +655,21 @@ def main() -> int:
                     run_records_by_key[run_key] = persisted
                     write_jsonl(run_path, list(run_records_by_key.values()))
                     continue
+                if repairing_reproductions:
+                    stale_ids = [
+                        observation_id for observation_id, row in observations_by_id.items()
+                        if row.get("task_id") == task
+                        and row.get("target_checkpoint") == checkpoint
+                        and row.get("suite_sha256") == suite_hash
+                    ]
+                    for observation_id in stale_ids:
+                        del observations_by_id[observation_id]
                 for test in result["tests"]:
-                    if test["outcome"] != "failed" or test["nodeid"] not in eligible:
+                    if test["nodeid"] not in eligible:
+                        continue
+                    if test["outcome"] == "error" and not is_target_syntax_regression(test):
+                        continue
+                    if test["outcome"] not in {"failed", "error"}:
                         continue
                     relative_test = test["nodeid"].split("::", 1)[0]
                     rel = PurePosixPath(relative_test)
@@ -552,6 +698,7 @@ def main() -> int:
                     }
                     reproduction_runs: list[dict[str, Any]] = []
                     exact_failure_reproductions = 0
+                    exact_error_reproductions = 0
                     for repetition in range(1, REPRODUCIBILITY_REPEATS + 1):
                         reproduced = run_suite(
                             runtime_dir,
@@ -579,8 +726,15 @@ def main() -> int:
                             and len(matching_outcomes) == 1
                             and matching_outcomes[0]["outcome"] == "failed"
                         )
+                        reproduced_error = (
+                            reproduced["status"] == "complete"
+                            and len(matching_outcomes) == 1
+                            and matching_outcomes[0]["outcome"] == "error"
+                        )
                         if reproduced_failure:
                             exact_failure_reproductions += 1
+                        if reproduced_error:
+                            exact_error_reproductions += 1
                         reproduction_runs.append({
                             "repetition": repetition,
                             "run_status": reproduced["status"],
@@ -593,9 +747,9 @@ def main() -> int:
                         })
                     if exact_failure_reproductions == REPRODUCIBILITY_REPEATS:
                         reproducibility_status = "stable_failure"
-                    elif any(item["run_status"] != "complete" or any(
-                        outcome["outcome"] == "error" for outcome in item["outcomes"]
-                    ) for item in reproduction_runs):
+                    elif exact_error_reproductions == REPRODUCIBILITY_REPEATS:
+                        reproducibility_status = "stable_error"
+                    elif any(item["run_status"] != "complete" for item in reproduction_runs):
                         reproducibility_status = "infrastructure_error"
                     elif exact_failure_reproductions == 0:
                         reproducibility_status = "transient_failure"
@@ -604,6 +758,7 @@ def main() -> int:
                     observation["reproducibility"] = {
                         "repeat_count": REPRODUCIBILITY_REPEATS,
                         "repeated_failure_count": exact_failure_reproductions,
+                        "repeated_error_count": exact_error_reproductions,
                         "status": reproducibility_status,
                         "runs": reproduction_runs,
                     }
@@ -628,8 +783,9 @@ def main() -> int:
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "dataset": "rq1_full_36x1",
         "task_count": len(selected),
+        "methods": list(methods),
         "source_checkpoint": "C1",
-        "method_suite_count": len(METHODS),
+        "method_suite_count": len(methods),
         "unique_suite_runs": len(run_records),
         "expected_unique_suite_runs": len(expected_run_keys),
         "missing_suite_runs": missing_run_keys,
@@ -639,8 +795,9 @@ def main() -> int:
         "reproducibility_repeat_count": REPRODUCIBILITY_REPEATS,
         "infrastructure_error_count": infra_errors,
         "baseline_audit_sha256": sha256_file(BASELINE_PATH),
-        "vanilla_suite_suffix": DEFAULT_VANILLA,
         "guided_suite_suffix": args.guided_suffix,
+        "guided_suite_root": str(args.guided_root),
+        "vanilla_suite_suffix": DEFAULT_VANILLA,
         "candidate_observations_path": events_path.name,
         "run_records_path": run_path.name,
         "status": "complete" if infra_errors == 0 else "complete_with_infrastructure_errors",

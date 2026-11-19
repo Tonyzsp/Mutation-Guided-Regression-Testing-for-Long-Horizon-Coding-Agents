@@ -1,0 +1,7 @@
+{
+  "format": "rq1-recovery-scope-amendment-lock/v1",
+  "experiment_id": "rq1_full_36x1_recovery_v2_mg_only_20261118",
+  "budget_path": "config/rq1_recovery_v2_mg_only_amendment.json",
+  "sha256": "b7e907d629269715dfea1182794d48f2e3ce7526671af333aaba44ea798955e2",
+  "change_policy": "Any further scope or budget change requires a new amendment ID."
+}

@@ -1,0 +1,16 @@
+{
+  "format": "rq1-model-input-exclusions/v1",
+  "policy_id": "rq1_c1_future_reference_exclusion_v1",
+  "purpose": "Exclude known future-checkpoint reference implementation material from model prompts while preserving the original checkpoint package for benchmark test execution.",
+  "exclusions": [
+    {
+      "task_id": "test_translator",
+      "checkpoint_id": "C1",
+      "root": "base_tests",
+      "path": "solutions.py",
+      "sha256": "270c4779355f0c7a3440e46405ff0db0b9948d7583c4c11bcc5638d8b12e832a",
+      "reason": "This unused helper contains reference implementations for later checkpoints; C1 conftest.py and test_checkpoint_1.py do not import it.",
+      "applies_to": ["vanilla_generation", "mutation_guided_generation", "mutant_family_triage", "candidate_correctness_review"]
+    }
+  ]
+}

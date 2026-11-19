@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "budget_id": "rq1-c1-recovery-v2-gpt6-luna-medium-1call-4096out-4candidates-per-call",
+  "scope": "One of two independent paired-budget generation slots for a v2 recovery task; the coordinator enforces the cumulative two-call/eight-candidate cap.",
+  "prompt_template_version": "c1_shared_gap_v4_cohort_v2",
+  "require_generation_assessment": true,
+  "output_schema": "schemas/codex-generated-test-candidates-gap-v2.schema.json",
+  "model": {
+    "provider": "openai_codex",
+    "model_id": "gpt-6-luna",
+    "reasoning_effort": "medium",
+    "temperature": null,
+    "decoding_note": "Use Codex service default; the CLI does not expose a temperature override.",
+    "model_config_id": "openai-codex-gpt-6-luna-medium-rq1-recovery-v2"
+  },
+  "budget": {
+    "max_calls": 1,
+    "max_output_tokens": 4096,
+    "per_call_output_tokens": 4096,
+    "max_candidates": 4,
+    "candidate_unit": "candidate files; each file may define exactly one top-level pytest test function",
+    "binding_dimensions": ["max_calls", "max_candidates"],
+    "repair_calls": 0,
+    "attempt_policy": "Exactly one launch slot per call directory. Any process/model failure consumes the slot; no retry.",
+    "token_usage_policy": "Record service-reported usage when available. The 4096 output-token value is a requested target, not a guaranteed service hard limit."
+  },
+  "validation": {
+    "repeat_runs": 3,
+    "target_repeat_runs": 3,
+    "flakiness_rule": "Reject a candidate if collection or any source-checkpoint execution run fails, times out, is unstable, or introduces a failure beyond the stable C1 baseline.",
+    "correctness_rule": "Retain only candidates whose asserted behavior is directly specified and whose blind review verdict is correct.",
+    "base_suite_rule": "Preserve the complete legal C1 base suite and hash-matched baseline audit.",
+    "guided_rule": "A retained Guided candidate must kill at least one named same-checkpoint surviving mutant in all three fresh runs."
+  },
+  "data_policy": {
+    "trajectory_provenance": "Release snapshots and per-checkpoint agent_run_manifest.json are the frozen trajectories.",
+    "file_backup_errors": "Excluded from released legal base_tests packages and isolated under data/excluded_tests.",
+    "hidden_and_future_data": "Never supplied to generation, triage, review, or validation."
+  }
+}

@@ -69,10 +69,22 @@ def main() -> int:
         case_review_dir.mkdir(exist_ok=True)
         response_path = case_review_dir / "review.json"
         run_path = case_review_dir / "run_manifest.json"
-        if response_path.is_file() and run_path.is_file() and json.loads(run_path.read_text(encoding="utf-8")).get("status") in {"complete", "inconclusive_call_failure"}:
+        previous_run = json.loads(run_path.read_text(encoding="utf-8")) if run_path.is_file() else None
+        if response_path.is_file() and previous_run and previous_run.get("status") == "complete":
             results.extend(json.loads(response_path.read_text(encoding="utf-8"))["reviews"])
             print(f"[{index}/{len(cases)}] REUSE {case_id}", flush=True)
             continue
+
+        prior_attempt_archive: str | None = None
+        if previous_run and previous_run.get("status") == "inconclusive_call_failure":
+            archive_root = case_review_dir / "prior_failed_attempts"
+            archive_root.mkdir(exist_ok=True)
+            archive_dir = archive_root / str(len(list(archive_root.iterdir())) + 1)
+            archive_dir.mkdir()
+            for prior_file in case_review_dir.iterdir():
+                if prior_file.is_file():
+                    shutil.copy2(prior_file, archive_dir / prior_file.name)
+            prior_attempt_archive = str(archive_dir.relative_to(adjudication_dir))
 
         prompt_text = template + "\n\n## Candidate case (JSON)\n\n" + json.dumps(case, ensure_ascii=False, indent=2)
         (case_review_dir / "prompt.md").write_text(prompt_text, encoding="utf-8")
@@ -122,7 +134,11 @@ def main() -> int:
                 (case_review_dir / f"events-{attempt}.jsonl").write_text(events, encoding="utf-8")
                 (case_review_dir / f"stderr-{attempt}.log").write_text(stderr, encoding="utf-8")
                 if exit_code == 0 and captured:
-                    parsed = json.loads(response_text)
+                    try:
+                        parsed = json.loads(response_text)
+                    except json.JSONDecodeError as error:
+                        parsed = None
+                        attempt_record["validation_error"] = f"judge output was not valid JSON: {error}"
                     reviews = parsed.get("reviews") if isinstance(parsed, dict) else None
                     if isinstance(reviews, list) and len(reviews) == 1 and reviews[0].get("case_id") == case_id:
                         accepted = reviews[0]
@@ -131,11 +147,9 @@ def main() -> int:
                         parsed["reviews"] = [accepted]
                         response_path.write_text(json.dumps(parsed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
                         break
-                    attempt_record["validation_error"] = "judge response did not contain exactly this case ID"
-                    attempt_record["structured_response_captured"] = True
-                    break
-                if captured:
-                    break
+                    if "validation_error" not in attempt_record:
+                        attempt_record["validation_error"] = "judge response did not contain exactly this case ID"
+                    attempt_record["structured_response_captured"] = captured
 
         if accepted is None:
             accepted = {
@@ -159,6 +173,7 @@ def main() -> int:
             "model": args.model,
             "reasoning_effort": args.reasoning_effort,
             "attempts": attempts,
+            "prior_attempt_archive": prior_attempt_archive,
             "token_usage": next((item.get("token_usage") for item in attempts if item.get("token_usage")), None),
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
         }

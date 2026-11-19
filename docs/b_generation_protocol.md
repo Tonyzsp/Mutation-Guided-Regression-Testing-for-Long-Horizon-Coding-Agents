@@ -1,7 +1,9 @@
 # B-side Test Generation Protocol (Draft)
 
-**Status:** Method validation closed on 2026-11-14; full-cohort development is approved, but pre-evaluation preparation remains incomplete. See the [validation phase exit review](../reports/validation_phase_exit_20261114.md). The [team protocol](experiment_protocol.md) remains authoritative for shared decisions.
+**Status:** Method validation is closed; full-cohort artifacts are available. For current MG execution and combined reporting, use the [Unified Mutation-Guided Protocol](rq1_mutation_guided_unified_protocol.md); the frozen full-study budget remains provenance for the original study design. The [team protocol](experiment_protocol.md) remains authoritative for shared decisions.
 **Scope:** Mutation analysis and generated-test preparation for RQ1. The team protocol is authoritative for checkpoint construction, legal test access, and regression adjudication.
+
+> **Protocol note:** This document preserves the earlier B-side implementation plan. Do not use its historical batch sections as separate current MG procedures; follow the [Unified Mutation-Guided Protocol](rq1_mutation_guided_unified_protocol.md) for the consolidated generation and validation rules.
 
 ## 1. Research question and comparison
 
@@ -24,8 +26,20 @@ support Windows extended-length paths. A previous `Path.rglob` traversal silentl
 deep C1 fixtures and failed to find some future files; the affected utilities now use
 extended-path traversal, and the package audit checks all 196 packages before cohort runs.
 For each generator input manifest, compare the supplied base-test file/hash set against
-the complete sanitized package tree. A subset is a preparation error, even if the test
+the complete sanitized package tree after applying only the explicit, hash-verified model
+input exclusions below. Any other omitted file is a preparation error, even if the test
 command itself can collect successfully.
+
+One explicit model-input exclusion is recorded in
+[`rq1_model_input_exclusions_v1.json`](../config/rq1_model_input_exclusions_v1.json):
+`test_translator/C1/base_tests/solutions.py` contains reference implementations for later
+checkpoints and is not imported by the C1 tests. Its exact SHA-256 is checked before omission.
+The file is excluded from Vanilla/Guided prompts, mutant-family triage, and candidate-review
+prompts; the benchmark package and runtime `base_tests` tree remain unchanged. Manifests record
+the excluded path, hash, reason, and policy hash. Any earlier model artifact that included this
+file is not eligible for formal use: test_translator Vanilla generation and family triage must
+be repeated using the filtered model view. This is a model-input safety filter, not a change to
+the Original test suite or its package hash.
 
 The Release archive itself is not safe to pass directly to a generator. Use only the sanitized tree named by `data/checkpoints/ISOLATION_MANIFEST.json`; hidden, future, and deferred error test data are stored in sibling isolated roots.
 
@@ -43,7 +57,7 @@ Prompt drafts are in [`prompts/`](../prompts/). Both generators use the same str
 4. For each reported mutant, record its ID, operator, source location, diff, raw tool outcome, normalized status, and supporting logs.
    Extract diffs in configurable batches (`--diff-chunk-size`, default 32) to bound container memory use. If a batch fails with an out-of-memory error, halve that batch and retry the same mutants down to one at a time. Each completed batch is cached in the runtime directory, so an interrupted export can resume without re-extracting earlier diffs. The selected starting batch size is written to the export summary and does not change mutant selection or classification.
 5. Verify on a representative mutant that the test process imports the mutated source. Record the mutated source path or digest observed by the subprocess. If tests launch the program in a child process, make sure mutmut's stats phase receives trampoline hits from that child and associates them with the pytest test ID; otherwise mutmut may mark every mutant `not checked`. A test that accidentally imports the original checkout invalidates the mutation result.
-6. Preserve every raw mutant record and directly classify each mutant by applying it to staged C1 source and running stable passing C1 test IDs. Mutations that cannot be applied or whose run is incomplete are errors/inconclusive and must not be called survivors. A test-level error on a selected stable test can count as killed only when raw mutmut also reports `killed` and the output has no known resource/harness error marker; retain the errored test IDs and rationale in the direct record. For `execution_server/C1`, the readiness fixture's final `connection refused` text can be stale after an initial request receives a non-200 response; when the only errored selected test is `TestCore.test_initial_stats`, treat it as a kill only if raw mutmut reports `killed` and the traceback contains the fixture's `Server did not start` message. Keep this exception narrow and preserve its rationale. On resume, validate and recover worker shards independently against task/checkpoint, source and baseline hashes, algorithm/protocol version, stable test IDs, and mutant IDs/statuses; one incomplete sibling shard must not discard a valid shard. Archive shard error/timeout attempts and parent-run inconclusive attempts, retry unresolved mutant IDs on resume, and retain the attempt-history JSONL with the normalized bundle. A direct `error` or `timeout` remains an inconclusive outcome in the current bundle; do not count it as killed or survived. Bundle `complete` means every expected mutant has exactly one hash-matched record, while `all_attempts_resolved` separately indicates whether any execution errors/timeouts remain. A finished mutmut run that exits nonzero may still be reused when its hash-matched result listing is nonempty; preserve its raw statuses and send the mutant inventory to direct classification. `not checked` is never a survivor or a complete raw mutation score. If mutmut reports `no tests` and the subprocess-hit log has no matching target-function hit, record direct status `not_tested` and normalized status `inconclusive`; do not call it a survivor or claim the exact mutated line is unreachable. Other mutants without a function-specific hit use the full stable suite, and their target-function reachability remains unknown. Direct survivors remain `needs_review` because mutmut does not prove semantic non-equivalence. Specification review and the Guided target-kill check prevent unsupported assertions from being retained, while unfiltered hints may consume generation budget.
+6. Preserve every raw mutant record and directly classify each mutant by applying it to staged C1 source and running stable passing C1 test IDs. Mutations that cannot be applied or whose run is incomplete are errors/inconclusive and must not be called survivors. A test-level error on a selected stable test can count as killed only when raw mutmut also reports `killed` and the output has no known resource/harness error marker; retain the errored test IDs and rationale in the direct record. For `execution_server/C1`, the readiness fixture's final `connection refused` text can be stale after an initial request receives a non-200 response; when the only errored selected test is `TestCore.test_initial_stats`, treat it as a kill only if raw mutmut reports `killed` and the traceback contains the fixture's `Server did not start` message. Keep this exception narrow and preserve its rationale. On resume, validate and recover worker shards independently against task/checkpoint, source and baseline hashes, algorithm/protocol version, stable test IDs, and mutant IDs/statuses; one incomplete sibling shard must not discard a valid shard. Archive shard error/timeout attempts and parent-run inconclusive attempts, retry unresolved mutant IDs on resume, and retain the attempt-history JSONL with the normalized bundle. A direct `error` or `timeout` remains an inconclusive outcome in the current bundle; do not count it as killed or survived. Bundle `complete` means every expected mutant has exactly one hash-matched record, while `all_attempts_resolved` separately indicates whether any execution errors/timeouts remain. A finished mutmut run that exits nonzero may still be reused when its hash-matched result listing is nonempty; preserve its raw statuses and send the mutant inventory to direct classification. `not checked` is never a survivor or a complete raw mutation score. If mutmut reports `no tests` and the subprocess-hit log has no matching target-function hit, record direct status `not_tested` and normalized status `inconclusive`; do not call it a survivor or claim the exact mutated line is unreachable. Other mutants without a function-specific hit use the full stable suite, and their target-function reachability remains unknown. Direct survivors remain `needs_review` because mutmut does not prove semantic non-equivalence. The family selection and bounded C1-only LLM triage in Section 3 control which survivors are exposed as Guided hints; the complete archive is never an unfiltered prompt input.
 
 If direct classification yields zero surviving mutants, record a valid zero-call Guided run with zero generated candidates, skip candidate correctness review, and pass the unchanged shared base suite through the normal baseline validator and freezer. This is a completed empty Guided suite, not a generation failure; its generation record must retain the mutation bundle hash and explicitly say why no model call was made. The generation-run schema permits zero eligible mutants and zero CLI attempts for this case.
 
@@ -52,7 +66,7 @@ If direct classification yields zero surviving mutants, record a valid zero-call
 | Status | Operational meaning |
 |---|---|
 | `killed` | The base suite fails on the mutant, with failure attributable to the changed behavior. |
-| `survived` | The mutant executes and the base suite passes. Eligible survivors may be shown to the Guided generator. |
+| `survived` | The mutant executes and the base suite passes. It may enter the frozen family-selection process; only selected, triage-eligible representatives may be shown to the Guided generator. |
 | `invalid` | The mutant cannot be meaningfully evaluated because the changed program is syntactically invalid, cannot import, or otherwise cannot reach test execution. Preserve the exact failure evidence. |
 | `unreachable` | Coverage or execution tracing shows the mutated location was not reached by the base suite. This is a triage label, not a synonym for a surviving mutant. |
 | `suspected_equivalent` | Review suggests no behavior change under the applicable specification, but equivalence has not been proved. Preserve the review rationale. |
@@ -81,7 +95,15 @@ establish that the mutant is non-equivalent, specified, or useful as a test-gene
 Keep every raw mutant and every direct status in the archive; triage only controls which
 survivors are exposed to the Guided generator.
 
-Classify every direct survivor exactly once against the same C1 specification and source:
+Preserve every direct survivor and its direct execution status. For generation hints, first group
+records into mechanical families by task, source file, enclosing function, mutmut operator, and
+normalized AST edit. Choose the lexicographically smallest stable mutant ID as each representative.
+Use the frozen budget's per-task cap of 16 representatives, selected by round-robin across
+`(source_file, operator)` strata. The remaining survivors are deferred by the hint budget; this
+does not mean they are equivalent or out of scope.
+
+The fixed GPT-6 Luna medium triage call labels only selected representatives against the C1
+specification:
 
 | Triage status | Required rationale |
 |---|---|
@@ -91,31 +113,15 @@ Classify every direct survivor exactly once against the same C1 specification an
 | `out_of_scope` | Explain why the change has no supported C1 requirement or only changes incidental/internal behavior. |
 
 Do not use a function-level subprocess hit as proof that the exact mutated line ran. Use it
-only as supporting evidence or as a tie-breaker. Do not label a survivor unreachable from a
-function hit alone.
+only as supporting evidence. Never label a survivor unreachable from a function hit alone.
+The triage result must cite an explicit C1 requirement, observable public behavior, deterministic
+input, and expected result for `eligible`; retain uncertainty instead of inferring equivalence.
 
-Before sending eligible mutants, group them into behavior families. Mutants belong to one
-family only when they concern the same C1 requirement and substantially the same triggering
-input and observable difference. Preserve all family members in the raw records. When a
-family is represented in the generation prompt, prefer one representative with a concrete
-trigger and clear oracle; record the other family members as not selected because of
-redundancy. This avoids spending a generation call on several near-duplicate diffs without
-changing the archived mutant pool or its direct classifications.
-
-In each triage decision, `behavior_family_id` identifies that family,
-`selected_for_generation` records whether the survivor is included in the prompt, and
-`selection_rationale` explains any eligible survivor that is omitted. Formal triage files
-must set the selection flag explicitly for every eligible record. Legacy v1 triage files
-without the field continue to select all `eligible` survivors. The input manifest records
-semantic eligibility separately from the selected hint IDs, and test freezing rechecks the
-selected IDs against the hash-matched triage file.
-
-If the prompt still exceeds a practical size limit, freeze a per-unit hint cap and a
-deterministic ranking rule before the formal cohort. Rank only `eligible` representatives:
-explicit specification anchor first, then concrete trigger and oracle, then independent
-behavior family; use the stable mutant ID as the final tie-breaker. Record selected and
-omitted IDs and reasons. Do not tune this selection using later checkpoints, regression
-events, or generation outcomes. The same cap and ranking rule must apply to every task.
+Each triage record includes its mechanical family ID, representative ID, selected/deferred
+reason, semantic status, and rationale. The input manifest stores the complete survivor inventory
+hash separately from selected hint IDs. Do not alter selection using later checkpoints, regression
+events, or generation outcomes. Guided receives only selected `eligible` records, at most 16 per
+task.
 
 Keep the Vanilla and Guided generation budgets paired: same model/version, call ceiling,
 output-token ceiling, candidate-file ceiling, retry policy, and validation repetitions.
@@ -181,13 +187,13 @@ result.
 
 ## 4. Generator inputs and information boundary
 
-Vanilla and Mutation-Guided use the same model/version, common prompt material, current `C_i` specification, current source snapshot, and complete legal base suite. Mutation-Guided additionally receives only the selected surviving-mutant IDs and diffs produced from that same `C_i`. Before a full cohort generation, prepare an audited triage decision for every direct survivor; `run_guided_c1_cohort.py` requires `--mutant-triage-dir` and passes only `eligible` mutants. The explicit `--allow-untriaged-survivors` override is for exploratory runs only because unfiltered survivors can consume the fixed generation budget on equivalent or specification-irrelevant changes.
+Vanilla and Mutation-Guided use the same model/version, common prompt material, current C1 specification, source snapshot, and complete legal base suite. Mutation-Guided additionally receives only selected C1 survivor-family hints that passed the frozen triage. The complete inventory remains available for audit, but hints are capped at 16 per task. The explicit `--allow-untriaged-survivors` override is for exploratory runs only.
 
-Neither generator receives hidden tests, future checkpoints, future failures, regression-event labels, or oracle/adjudication material. Prompts and all supplied files must be retained so this boundary can be audited.
+Neither generator receives hidden tests, future checkpoints, future failures, regression-event labels, reference solutions, or oracle/adjudication material. Apply the versioned model-input exclusion policy before assembling any prompt. Prompts, supplied files, and exclusion manifests must be retained so this boundary can be audited.
 
 ## 5. Budget and fair comparison
 
-Before formal generation, assign a `budget_id` and freeze the budget policy. At minimum, log and compare:
+The full-cohort budget is now frozen in [`rq1_full_study_budget_v1.json`](../config/rq1_full_study_budget_v1.json); the generation component reuses [`generation_budget_rq1_c1_cohort_formal.json`](../config/generation_budget_rq1_c1_cohort_formal.json). Before formal generation, verify that the run manifests record the frozen budget SHA-256. At minimum, log and compare:
 
 - model provider, exact model/version, decoding settings, and prompt-template version;
 - maximum model calls, output-token budget, and candidate-test budget per task/checkpoint/method;
@@ -195,7 +201,7 @@ Before formal generation, assign a `budget_id` and freeze the budget policy. At 
 - candidates emitted, candidates validated, candidates retained, and validation/repair calls;
 - generation wall time and mutation-analysis execution time.
 
-Use the same model and predeclared generation limits for Vanilla and Guided. Charge all generation and repair calls to the method that used them. Report mutation-analysis compute separately from the test-generation budget, while retaining it as total pipeline cost. Exact numeric limits and how to handle unavailable token counts must be approved jointly at Gate 1; they must not be tuned after seeing regression results.
+Use the same model and predeclared generation limits for Vanilla and Guided. Charge all generation and repair calls to the method that used them. Report survivor-triage calls, mutation-analysis compute, and Guided's additional prompt tokens separately from the binding test-generation budget. Codex output-token targets are not hard service limits; report actual token usage when available and do not infer missing values.
 
 ## 6. Generated-test validation and freezing
 
@@ -203,8 +209,8 @@ Validate each candidate against the exact source checkpoint used for generation:
 
 1. The test is collected by the declared test runner and has a stable test identifier.
 2. It passes on the unmodified `C_i` source and does not rely on hidden or future information.
-3. It is consistent with the applicable specification, checked using a trusted correct implementation or an independently documented correctness check. If neither is available, mark the candidate's correctness validation as unavailable; do not call it validated by default.
-4. It is repeatable under a predeclared number of runs in the same environment. The run count and flakiness rule are Gate 1 decisions.
+3. It is judged consistent with the applicable specification by the fixed, method-blind LLM review batch. This review is not an independent correctness oracle; report it as automated review evidence and retain uncertainty as rejection.
+4. It is repeatable under the three predeclared runs in the same environment and introduces no new stable failure relative to the hash-matched C1 baseline audit. Existing baseline failures are allowed and must remain separately identified.
 5. For Guided candidates, it also fails on the targeted mutant and passes on the original `C_i` source. Record the exact mutant ID and execution evidence.
 
 Retain rejected candidates and rejection reasons. Freeze the accepted suite, test-file hashes, input package hash, prompt/configuration identifiers, and validation log before any later-checkpoint evaluation. Do not alter assertions after observing future checkpoints.
@@ -222,14 +228,11 @@ For every task, trajectory, starting checkpoint, and generation method, retain:
 
 RQ1's primary outcome is the count of distinct confirmed candidate-regression events detected by each suite under the team protocol's observed-union analysis boundary; A owns event confirmation and deduplication. Do not describe this count as an absolute regression-detection rate. B may report generation success, valid new-test count, mutation score, and coverage as explanatory measures. These auxiliary measures do not replace RQ1's regression-detection outcome.
 
-## 8. Decisions to ratify at Gate 1
+## 8. Frozen decisions and remaining implementation gate
 
-- Exact budget limits and whether candidate count or token count is the binding generation constraint.
-- Model/version, decoding settings, and repair-call policy.
-- Correctness evidence available for generated tests when no reference implementation is supplied.
-- Number of repeat runs and the rule for declaring a test flaky.
-- Exact mutmut release/configuration and mapping from its raw outcomes to normalized statuses.
-- Checkpoint-package path conventions and fields shared with A.
+- The model, paired generation cap, candidate cap, triage hint cap, candidate review budget, three-repeat validation, later-checkpoint run cap, and LLM adjudication rule are fixed in the v1 budget file.
+- Before formal runs, update/audit the runners so each run records the budget hash and enforces the 16-hint cap, one infrastructure retry per evaluation suite/checkpoint, and the frozen review/adjudication limits.
+- Keep release/configuration hashes, normalized mutant statuses, candidate-review responses, suite hashes, and run logs in the run manifests.
 
 ### B-side pilot settings adopted on 2026-10-18
 
@@ -311,14 +314,17 @@ and
 `artifacts/results/rq1_full_36x1/eve_route_planner/C1/mutation_guided_gap_v4_gpt6luna_medium_20261018/`.
 
 The generation scripts now read the output schema from the budget configuration and record
-its hash in the input manifest. The Guided runner can accept a triage file, verify that it
-classifies every raw survivor exactly once against the matching task/checkpoint/trajectory
-and raw-record hash, and send only `eligible` records. An earlier full-cohort prototype
-sent all direct survivors without semantic triage and marked them `needs_review`; treat
-those runs as historical exploratory artifacts. The current formal runner requires a
-hash-matched triage file for every selected task and sends only `eligible` survivors.
-Retained Guided candidates must still pass C1, satisfy an independent specification review,
-and directly kill a named survivor.
+its hash in the input manifest. The existing Guided runner can accept a triage file and
+validate a complete classification of raw survivors, but that behavior does not yet enforce
+the newly frozen family-level selection cap. The formal protocol now selects at most 16
+deterministic family representatives per task and sends only those selected hints through
+the bounded triage step; unselected survivors are recorded as deferred. Runner and manifest
+enforcement for this cap and triage-call limit are still required before the formal run.
+An earlier full-cohort prototype sent all direct survivors without semantic triage and
+marked them `needs_review`; treat those runs as historical exploratory artifacts. Retained
+Guided candidates must pass C1 without adding a stable failure relative to the baseline
+audit, receive a `correct` verdict from the method-blind LLM review, and directly kill a
+named survivor.
 
 For the reverse-gate survivors, an engineering-only probe now creates a tiny SDE with one
 directed jump row and checks both route directions. Unchanged C1 passes; temporary copies
@@ -350,7 +356,14 @@ recovered run did not preserve its original runner manifest/log; this is disclos
 that result bundle. The RQ1 regression comparison for that one pilot remains separate from
 the full-cohort report.
 
-## Formal 36-task cohort status (updated 2026-10-19)
+## Current formal-cohort status (updated 2026-11-16)
+
+- C1 baseline, coverage, and direct-mutant classification are complete and hash-linked for all 36 tasks: 22,337 mutants, 12,800 killed, 8,490 survived, and 1,047 inconclusive.
+- The previous formal-v4 Vanilla artifacts match the current C1 package hash for 35/36 tasks. Do not reuse `execution_server/C1`'s old Vanilla artifact; its base-test hash differs.
+- Mutation-Guided is still pilot-only. Complete the frozen family selection and full 36-task generation/validation before the evaluation gate.
+- Later-checkpoint execution and LLM adjudication have not started. See the [full experiment protocol and budget](rq1_formal_protocol_and_budget_v1.md).
+
+## Historical formal-cohort status (2026-10-19; superseded)
 
 - C1 repeated base-suite audit: complete for 36/36 tasks; 7 suites pass fully and 29 contain stable pre-existing failures.
 - Vanilla generation and freezing: complete for 36/36 tasks under GPT-6 Luna medium and the paired three-call/eight-candidate/12,288-output-token budget.
