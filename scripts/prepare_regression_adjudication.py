@@ -190,9 +190,9 @@ def main() -> int:
     args = parser.parse_args()
 
     evaluation_dir = args.evaluation_dir.resolve(strict=True)
-    allowed_root = RESULT_ROOT.resolve(strict=True)
+    allowed_root = (ROOT / "artifacts" / "results").resolve(strict=True)
     if not evaluation_dir.is_relative_to(allowed_root):
-        raise ValueError("evaluation directory must remain under the RQ1 result root")
+        raise ValueError("evaluation directory must remain under artifacts/results")
     output_dir = Path(os.path.abspath(args.output_dir)) if args.output_dir else evaluation_dir / "blinded_adjudication"
     if not output_dir.is_relative_to(evaluation_dir) or os.path.exists(filesystem_path(output_dir)):
         raise ValueError("adjudication output must be a new directory inside the evaluation directory")

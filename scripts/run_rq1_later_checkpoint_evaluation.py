@@ -234,6 +234,8 @@ def source_suite(
     method: str,
     guided_suffix: str,
     guided_root: Path = RESULT_ROOT,
+    vanilla_suffix: str | None = None,
+    vanilla_root: Path = RESULT_ROOT,
 ) -> tuple[Path, list[str], str, str | None]:
     package_root = (PACKAGE_ROOT / task / "C1").resolve(strict=True)
     package = read_json(package_root / "package.json")
@@ -241,8 +243,8 @@ def source_suite(
         base = package_file(package, package_root, "base_tests_path")
         return base, [], hash_tree(base), None
 
-    suffix = vanilla_cohort_suffix(task) if method == "vanilla_llm" else guided_suffix
-    generation_root = RESULT_ROOT if method == "vanilla_llm" else guided_root
+    suffix = (vanilla_suffix or vanilla_cohort_suffix(task)) if method == "vanilla_llm" else guided_suffix
+    generation_root = vanilla_root if method == "vanilla_llm" else guided_root
     generation_dir = generation_root / task / "C1" / suffix
     frozen_path = generation_dir / "frozen_test_suite.json"
     if not os.path.isfile(filesystem_path(frozen_path)):
@@ -282,12 +284,14 @@ def eligible_source_ids(
     baseline: dict[str, Any],
     guided_suffix: str,
     guided_root: Path = RESULT_ROOT,
+    vanilla_suffix: str | None = None,
+    vanilla_root: Path = RESULT_ROOT,
 ) -> set[str]:
     ids = set(baseline.get("stable_pass_test_ids", []))
     if method == "original":
         return ids
-    suffix = vanilla_cohort_suffix(task) if method == "vanilla_llm" else guided_suffix
-    generation_root = RESULT_ROOT if method == "vanilla_llm" else guided_root
+    suffix = (vanilla_suffix or vanilla_cohort_suffix(task)) if method == "vanilla_llm" else guided_suffix
+    generation_root = vanilla_root if method == "vanilla_llm" else guided_root
     generation_dir = generation_root / task / "C1" / suffix
     frozen = read_json(generation_dir / "frozen_test_suite.json")
     validation_path = generation_dir / frozen["validation_log_path"]
@@ -306,11 +310,18 @@ def materialize_suite_overlay(
     guided_suffix: str,
     run_stamp: str,
     guided_root: Path = RESULT_ROOT,
+    vanilla_suffix: str | None = None,
+    vanilla_root: Path = RESULT_ROOT,
 ) -> tuple[Path, str, set[str], dict[str, Any]]:
     package_root = (PACKAGE_ROOT / task / "C1").resolve(strict=True)
     package = read_json(package_root / "package.json")
     source_base, generated_paths, _declared_hash, generation_dir_text = source_suite(
-        task, method, guided_suffix, guided_root
+        task,
+        method,
+        guided_suffix,
+        guided_root,
+        vanilla_suffix,
+        vanilla_root,
     )
     suite_root = ROOT / "tmp" / "rq1-evaluation-suites" / task / f"{method}-{run_stamp}"
     base_destination = suite_root / "base_tests"
@@ -484,6 +495,14 @@ def main() -> int:
         "--guided-root", type=Path, default=RESULT_ROOT,
         help="Root containing task/C1/<guided-suffix>; use a separate root for recovery suites.",
     )
+    parser.add_argument(
+        "--vanilla-suffix",
+        help="Frozen Vanilla directory name under each task/C1; defaults to the audited cohort suffix.",
+    )
+    parser.add_argument(
+        "--vanilla-root", type=Path, default=RESULT_ROOT,
+        help="Root containing task/C1/<vanilla-suffix>; use a separate root for recovery suites.",
+    )
     parser.add_argument("--problems-root", type=Path, default=ROOT / "external" / "scb-problems")
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--output-dir", type=Path)
@@ -493,6 +512,7 @@ def main() -> int:
     if args.guided_root.resolve() != RESULT_ROOT.resolve() and methods != ("mutation_guided",):
         raise ValueError("a non-default guided root is supported only for MG-only evaluation")
     args.guided_root = args.guided_root.resolve(strict=True)
+    args.vanilla_root = args.vanilla_root.resolve(strict=True)
 
     baseline_audit = read_json(BASELINE_PATH)
     baseline_by_task = {row["task_id"]: row for row in baseline_audit["records"]}
@@ -508,11 +528,18 @@ def main() -> int:
     if not selected:
         raise ValueError("no RQ1 task units selected")
 
-    # Freeze gate: do not read target checkpoint files until each selected method is frozen on every C1 unit.
-    for unit in units:
+    # Freeze gate: do not read target checkpoint files until each selected method is frozen for every selected C1 unit.
+    for unit in selected:
         task = unit["task_id"]
         for method in methods:
-            source_suite(task, method, args.guided_suffix, args.guided_root)
+            source_suite(
+                task,
+                method,
+                args.guided_suffix,
+                args.guided_root,
+                args.vanilla_suffix,
+                args.vanilla_root,
+            )
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output = args.output_dir.resolve() if args.output_dir else RESULT_ROOT / f"eval_{stamp}"
@@ -524,6 +551,8 @@ def main() -> int:
         "methods": list(methods),
         "guided_suffix": args.guided_suffix,
         "guided_root": str(args.guided_root),
+        "vanilla_suffix": args.vanilla_suffix or DEFAULT_VANILLA,
+        "vanilla_root": str(args.vanilla_root),
         "problems_root": str(args.problems_root),
         "timeout_seconds": args.timeout_seconds,
         "baseline_audit_sha256": sha256_file(BASELINE_PATH),
@@ -571,13 +600,27 @@ def main() -> int:
         source_package_root = (PACKAGE_ROOT / task / "C1").resolve(strict=True)
         source_package = read_json(source_package_root / "package.json")
         eligible_by_method = {
-            method: eligible_source_ids(task, method, baseline, args.guided_suffix, args.guided_root)
+            method: eligible_source_ids(
+                task,
+                method,
+                baseline,
+                args.guided_suffix,
+                args.guided_root,
+                args.vanilla_suffix,
+                args.vanilla_root,
+            )
             for method in methods
         }
         suites: dict[str, dict[str, Any]] = {}
         for method in methods:
             suite_dir, suite_hash, _, _ = materialize_suite_overlay(
-                task, method, args.guided_suffix, stamp, args.guided_root
+                task,
+                method,
+                args.guided_suffix,
+                stamp,
+                args.guided_root,
+                args.vanilla_suffix,
+                args.vanilla_root,
             )
             row = suites.setdefault(suite_hash, {"suite_dir": suite_dir, "methods": [], "eligible_test_ids": set()})
             row["methods"].append(method)
@@ -797,7 +840,8 @@ def main() -> int:
         "baseline_audit_sha256": sha256_file(BASELINE_PATH),
         "guided_suite_suffix": args.guided_suffix,
         "guided_suite_root": str(args.guided_root),
-        "vanilla_suite_suffix": DEFAULT_VANILLA,
+        "vanilla_suite_suffix": args.vanilla_suffix or DEFAULT_VANILLA,
+        "vanilla_suite_root": str(args.vanilla_root),
         "candidate_observations_path": events_path.name,
         "run_records_path": run_path.name,
         "status": "complete" if infra_errors == 0 else "complete_with_infrastructure_errors",

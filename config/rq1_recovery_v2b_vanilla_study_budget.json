@@ -1,0 +1,10 @@
+{
+  "budget_id": "rq1-full-36x1-vanilla-recovery-v2b",
+  "experiment_id": "rq1_full_36x1_vanilla_recovery_v2b",
+  "scope": "Paired Vanilla counterpart to the locked Mutation-Guided recovery v2; supplemental only.",
+  "generation_budget_config": "config/generation_budget_rq1_recovery_v2b_call.json",
+  "model": {"provider": "openai_codex", "model_id": "gpt-6-luna", "reasoning_effort": "medium"},
+  "generation": {"recovery_task_count": 29, "calls_per_task": 2, "candidates_per_call": 4, "candidates_per_task": 8, "requested_output_tokens_per_call": 4096, "maximum_generation_calls": 58},
+  "candidate_review": {"method_blind": true, "max_calls_per_task": 1, "max_candidates_per_call": 8, "requested_output_tokens_per_call": 2048},
+  "source_validation": {"repeat_runs": 3, "repair_calls": 0}
+}

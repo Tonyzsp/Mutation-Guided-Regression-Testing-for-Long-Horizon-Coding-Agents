@@ -1,0 +1,10 @@
+{
+  "budget_id": "rq1-c1-recovery-v2b-gpt6-luna-medium-1call-4096out-4candidates",
+  "scope": "One independent Vanilla recovery v2b generation slot; the paired coordinator limits each locked task to two slots.",
+  "prompt_template_version": "c1_shared_gap_v4_cohort_v2",
+  "output_schema": "schemas/codex-generated-test-candidates-gap-v2.schema.json",
+  "model": {"provider": "openai_codex", "model_id": "gpt-6-luna", "reasoning_effort": "medium", "decoding": "Codex service default", "model_config_id": "openai-codex-gpt-6-luna-medium-rq1-recovery-v2c"},
+  "budget": {"max_calls": 1, "max_output_tokens": 4096, "per_call_output_tokens": 4096, "max_candidates": 4, "repair_calls": 0, "attempt_policy": "One launched slot only; any failure consumes it and no retry is allowed."},
+  "validation": {"repeat_runs": 3, "flakiness_rule": "Reject collection failures, timeouts, unstable candidates, or candidates introducing failures beyond the C1 baseline."},
+  "data_policy": {"hidden_and_future_data": "Never supplied to generation."}
+}

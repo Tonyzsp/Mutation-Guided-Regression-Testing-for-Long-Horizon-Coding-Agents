@@ -1,0 +1,1 @@
+{"budget_id":"rq1-full-36x1-vanilla-recovery-v2c-composite","generation_budget_config":"config/generation_budget_rq1_recovery_v2c_composite.json","model":{"provider":"openai_codex","model_id":"gpt-6-luna","reasoning_effort":"medium"},"source_validation":{"repeat_runs":3,"repair_calls":0}}

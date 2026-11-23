@@ -1,0 +1,10 @@
+{
+  "budget_id": "rq1-c1-recovery-v2c-composite-2calls-8192out-8candidates",
+  "scope": "Immutable merge of two independently generated Vanilla recovery-v2c slots for one C1 task.",
+  "prompt_template_version": "c1_shared_gap_v4_cohort_v2",
+  "output_schema": "schemas/codex-generated-test-candidates-gap-v2.schema.json",
+  "model": {"provider": "openai_codex", "model_id": "gpt-6-luna", "reasoning_effort": "medium", "model_config_id": "openai-codex-gpt-6-luna-medium-rq1-recovery-v2c"},
+  "budget": {"max_calls": 2, "max_output_tokens": 8192, "per_call_output_tokens": 4096, "max_candidates": 8, "repair_calls": 0},
+  "validation": {"repeat_runs": 3, "target_repeat_runs": 1},
+  "data_policy": {"hidden_and_future_data": "Never supplied to generation."}
+}
