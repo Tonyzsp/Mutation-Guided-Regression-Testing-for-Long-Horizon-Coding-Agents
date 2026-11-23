@@ -1,6 +1,6 @@
 # Unified Mutation-Guided Protocol for RQ1 Preparation and Evaluation
 
-**Status:** Governing protocol for the combined Mutation-Guided (MG) C1 test cohort and its later-checkpoint evaluation. The prior run IDs, budget locks, and raw artifacts remain immutable provenance; future descriptions and combined analyses use this single protocol. This is an MG-only protocol and does not make an Original-versus-MG or Vanilla-versus-MG comparison.
+**Status:** Governing MG method protocol for the final RQ1 cohort. The final MG suite combines the accepted C1 MG tests into one frozen cohort; prior run IDs and budget locks remain immutable provenance, but future reporting does not split the cohort by historical batch. The companion [Vanilla Final V2 Protocol](rq1_vanilla_final_v2_protocol.md) defines the frozen Vanilla comparator and its later-checkpoint evaluation. Their evaluation conditions are paired; their test-generation budgets are not equal.
 
 ## 1. Scope and information boundary
 
@@ -43,7 +43,7 @@ Use one fixed, method-blinded GPT-6 Luna medium judge for all cases. Provide the
 
 ## 6. Reporting and current conformance note
 
-Report the combined MG cohort as one result: tasks and empty suites, mutants and triage, generation calls/candidates/retained tests, C1 validation, later-checkpoint observations, LLM verdicts, deduplicated events, coverage, and RQ3 lineage. Report MG-only findings as MG-only. The current combined materials record 25 retained MG tests across 16 tasks and 372 unique confirmed event episodes, including 6 events attributed only to MG-generated tests; these do not establish improvement over Original or Vanilla.
+Report the final MG cohort as one result: tasks and empty suites, mutants and triage, generation calls/candidates/retained tests, C1 validation, later-checkpoint observations, LLM verdicts, deduplicated events, coverage, and RQ3 lineage. The current final suite contains 25 retained MG tests across 16 tasks and its combined ledger records 372 unique confirmed event episodes, including 6 events attributed only to MG-generated tests. A comparison with Vanilla follows the companion protocol and must disclose that Vanilla received no incremental generation budget; it is not an equal-generation-budget estimate.
 
 The latest validation rule requires three target-mutant repetitions. The older frozen records for 13 retained tests document only one target-mutant repetition; this protocol does not retroactively upgrade those records. Keep their actual evidence visible in the combined report, and re-run those checks if a claim requires every retained test to satisfy the uniform three-run target-kill gate. Existing run IDs and locked configurations are not edited when this consolidated policy is adopted.
 

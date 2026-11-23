@@ -1,5 +1,7 @@
 # RQ1 Experiment Protocol
 
+> **Archived planning document.** The final operational rules are now the [Unified Mutation-Guided Protocol](rq1_mutation_guided_unified_protocol.md) and [Vanilla Final V2 Protocol](rq1_vanilla_final_v2_protocol.md). The historical equal-generation-budget framing and status table below do not govern the final comparison. Future reporting uses one final MG cohort and one final Vanilla cohort; the available Vanilla suite receives no new generation calls, so the comparison must disclose the generation-budget asymmetry.
+
 ## Scope and frozen benchmark inputs
 
 This protocol covers RQ1 only: whether tests generated at checkpoint `C_i` detect more
