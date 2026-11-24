@@ -34,6 +34,8 @@ Any mismatch blocks the cohort. Do not edit, repair, or regenerate a frozen Vani
 
 Run the Vanilla suite unchanged on every applicable later checkpoint for all 36 task trajectories: 160 task/checkpoint pairs in total. Use the same runner, Docker image (`rq1-b-tools:python312` with the C1 audit's pinned image ID), timeout, infrastructure retry rule, and test environment used for the completed final MG evaluation.
 
+The repository already contains the completed raw full-suite run `eval_all_methods_formal_v1_20261120`: it covers 36 tasks and 160 target checkpoint pairs for Original, Vanilla v5, and MG, with 352/352 deduplicated full-suite runs complete and zero unresolved full-suite infrastructure failures. Reuse those raw observations rather than rerunning them. Its manifests record the Docker tag but not the C1 audit's immutable image digest, so final reporting must disclose that legacy provenance limitation; the observations still require the common blinded adjudication and event ledger below before they are reported as regression episodes.
+
 - Suite timeout: 900 seconds.
 - Run each frozen suite once at each target checkpoint.
 - Retry a suite target only for a recorded infrastructure failure, at most once. Do not rerun a full suite because of an application assertion failure.
