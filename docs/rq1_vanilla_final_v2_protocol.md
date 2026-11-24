@@ -6,24 +6,24 @@
 
 Evaluate the existing frozen Vanilla C1 suite on the same later checkpoints and under the same execution and adjudication rules as the final Mutation-Guided (MG) composite suite.
 
-This protocol makes **no additional Vanilla generation calls**. It reuses the audited Vanilla suite: 49 retained generated tests across 26 tasks, with a frozen suite manifest for each of the 36 tasks. Do not expand this count to a requested or historical candidate total.
+This protocol makes **no additional Vanilla generation calls**. It reuses the audited frozen Vanilla v5 suite: 65 retained generated tests from 89 candidates across 26 tasks, with a frozen suite manifest for each of the 36 tasks. These are the physical manifests and cohort audit available in this repository; do not substitute an unmaterialized historical identifier or expand the suite during evaluation.
 
 The comparison is generation-budget asymmetric: the final MG suite includes the accepted MG recovery tests, while Vanilla receives no new tests. Results may be described as a comparison of the available frozen suites under matched evaluation conditions. They must not be described as a controlled comparison under equal test-generation budgets or as a causal effect of mutation guidance.
 
 ## 2. Frozen suite inputs
 
 - Source checkpoint: C1 for all 36 task trajectories.
-- Vanilla suite for task `T`: `artifacts/results/rq1_full_36x1/T/C1/vanilla_formal_v1_20261117/`.
-- Cohort audit: `artifacts/results/rq1_full_36x1/vanilla_formal_v1_cohort_audit_20261117.json`.
+- Vanilla suite for task `T`: `artifacts/results/rq1_full_36x1/T/C1/vanilla_formal_v5_20261116/`.
+- Cohort audit: `artifacts/results/rq1_full_36x1/c1_vanilla_cohort_audit_formal_v1_20261117.json`.
 - Shared C1 base-suite audit: `artifacts/results/rq1_full_36x1/c1_base_audit_current_sanitized_20261116/c1_base_suite_audit.json`.
 - Final MG comparator: `artifacts/results/rq1_recovery_v2/T/C1/mutation_guided_composite_v2/`, containing the unchanged legal C1 base tests plus all accepted MG tests in the final composite.
 
-The `vanilla_formal_v1_20261117` directory name is a frozen storage identifier. It does not define a separate current protocol cohort.
+The `vanilla_formal_v5_20261116` directory name is a frozen storage identifier. It does not define a separate current protocol cohort.
 
 Before any later-checkpoint package is read, the runner must verify:
 
 1. exactly 36 Vanilla suite manifests exist and identify the correct task and C1 source;
-2. the audited retained-test total is 49 across 26 tasks, and each test file matches its frozen suite hash;
+2. the audited retained-test total is 65 across 26 tasks, and each test file matches its frozen suite hash;
 3. every suite uses the legal C1 `base_tests` hash in the complete baseline audit;
 4. the baseline audit and package hashes match the sanitized C1 checkpoint packages; and
 5. the final MG composite has 36 matching suite manifests and its previously completed evaluation covers all 160 applicable later-checkpoint pairs.

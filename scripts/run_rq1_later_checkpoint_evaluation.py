@@ -28,8 +28,10 @@ PACKAGE_ROOT = ROOT / "data" / "checkpoints" / "checkpoint_packages_rq1_full_36x
 UNIT_PATH = ROOT / "config" / "rq1_full_36x1_candidate_units.json"
 BASELINE_PATH = RESULT_ROOT / "c1_base_audit_current_sanitized_20261116" / "c1_base_suite_audit.json"
 PREPARE_SCRIPT = ROOT / "scripts" / "prepare_checkpoint_runtime.py"
-VANILLA_AUDIT_PATH = RESULT_ROOT / "vanilla_formal_v1_cohort_audit_20261117.json"
-DEFAULT_VANILLA = "vanilla_formal_v1_20261117"
+# Canonical physical Vanilla cohort: all 36 manifests and the matching audit are
+# present locally.  The former v1/49-test identifier was never materialized.
+VANILLA_AUDIT_PATH = RESULT_ROOT / "c1_vanilla_cohort_audit_formal_v1_20261117.json"
+DEFAULT_VANILLA = "vanilla_formal_v5_20261116"
 DEFAULT_GUIDED = "mutation_guided_formal_v1_baseline_linked_20261117"
 CONTAINER_WORKSPACE = "/workspace"
 REPORT_PATH = "/workspace/rq1-evaluation-report.json"
